@@ -53,8 +53,8 @@ export default {
   ],
   ghosts: [[8, 16], [11, 19], [11, 21.5], [14, 23.8], [17, 24.8]],
   triggers: [
-    {x: 15, z: 5, r: 1.6, actions: [['say', 'Tap SWEEP (F) for one full picture of the room. It needs 30 s to recharge.', 6000]]},
-    {x: 27, z: 7, r: 2.2, actions: [['say', 'The way on is low. Tap CROUCH (C) to fit through.', 5000]]},
+    {x: 15, z: 5, r: 1.6, actions: [['say', {touch: 'Tap SWEEP for one full picture of the room. It needs 30 s to recharge.', mouse: 'Press F or right click for one full picture of the room. It needs 30 s to recharge.'}, 6000]]},
+    {x: 27, z: 7, r: 2.2, actions: [['say', {touch: 'The way on is low. Tap CROUCH to fit through.', mouse: 'The way on is low. Press C to crouch and fit through.'}, 5000]]},
     {x: 6, z: 15.5, r: 2.5, actions: [['say', 'Rust-coloured dots are old. Someone was here before you.', 5000]]},
     {x: 9, z: 24, r: 7, cores: 2, delay: 1.2, actions: [['silence', 7], ['steps', 16, 21, 3, 21, 11], ['say', 'Footsteps. Not yours.', 4000]]},
   ],

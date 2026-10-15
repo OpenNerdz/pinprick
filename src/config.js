@@ -40,30 +40,50 @@ export const STALKER = {
   patrol: 1.3, investigate: 2.4, hunt: 3.45, finale: 3.0,
   lunge: 1.9, lungeDist: 3.2,    // the last few metres of a hunt come at you this much faster
   catchDist: 0.85, catchCrawl: 1.15, // on all fours its head reaches further ahead of its body
-  alertTime: 0.85,               // it freezes this long, turning toward you, before it charges
+  stumble: 1.0,                  // after a lunge that misses, it stumbles at half speed this long
   lightWindow: 1.2,              // scanner hits on its body add up over about this many seconds
-  lingerDist: 3.2, lingerTime: [3.5, 5.5], // stops beside a hidden player and listens
+  lingerDist: 3.2, lingerTime: [3.5, 5.5], // stops beside a hidden or motionless player and listens
+  clearance: 1.4,                // it never walks closer than this to a player it has not noticed
   waitChance: 0.3, waitTime: [8, 14],      // sometimes stands silent and still instead of listening
   mimicEvery: [16, 34], groanEvery: [9, 20],
   crawlBelow: 2.6,               // ceilings lower than this put it on all fours
-  senseDist: 2.6,                // it notices anyone this close who isn't hidden
   loseAfter: 4.5,                // seconds without a fix before a hunt turns into a search
   listenTime: [2.5, 5],
+  stuckAfter: 1.2,               // seconds without progress (a crawl mouth, a shut door) before it gives up on a spot
+  searchListen: 1.4,             // it stops this long at each spot it searches
   repathEvery: 0.25,
 };
 
-/** Difficulty presets. Each value multiplies or replaces the base number it names. */
+/**
+ * Difficulty presets. Each value multiplies or replaces the base number it names. The creature's wits:
+ *   lightHold     seconds the beam must stay on its body before it knows where the light comes from
+ *   alertTime     how long it freezes, turning toward you, before it charges
+ *   lungeMax      how long its final lunge lasts before it stumbles
+ *   listen        hearing multiplier while it stands still listening (you hear it clicking)
+ *   predict       0..1, how far it reads ahead along the way you were heading when it loses you
+ *   searchPoints  spots it checks around where it lost you; searchRadius, how far around
+ *   ambush        when you escape into a crawl, it goes round to wait at the other end
+ *   bumpGrace     walking into it while it has not noticed you makes it recoil and freeze instead of grabbing
+ *   finaleGuess   seconds between its guesses at where you are after the last core; finaleJitter, how
+ *                 rough each guess is (fraction of the distance); finaleNear, the range where it is exact
+ */
 export const DIFFICULTY = {
   easy: {
-    label: 'Easy', blurb: 'Signal reads while you move. It hears less and moves slower.',
-    hearing: 0.7, speed: 0.85, heat: 0.75, dotLife: 24, signalStill: 0, tintFlesh: true, staticRange: 10, lightNotice: 60,
+    label: 'Easy', blurb: 'Signal reads while you move. It hears less, reacts slower and gives up sooner.',
+    hearing: 0.7, speed: 0.85, heat: 0.75, dotLife: 24, signalStill: 0, tintFlesh: true, staticRange: 10,
+    lightHold: 1.2, alertTime: 1.15, lungeMax: 1.0, listen: 1, predict: 0, searchPoints: 1, searchRadius: 5, ambush: false, bumpGrace: true,
+    finaleGuess: 2.5, finaleJitter: 0.2, finaleNear: 6,
   },
   normal: {
-    label: 'Normal', blurb: 'Stand still to read the signal. It hunts by sound.',
-    hearing: 1, speed: 1, heat: 1, dotLife: 20, signalStill: 0.5, tintFlesh: false, staticRange: 10, lightNotice: 30,
+    label: 'Normal', blurb: 'Stand still to read the signal. It hunts by sound and searches where it lost you.',
+    hearing: 1, speed: 1, heat: 1, dotLife: 20, signalStill: 0.5, tintFlesh: false, staticRange: 10,
+    lightHold: 0.7, alertTime: 0.85, lungeMax: 1.2, listen: 1.3, predict: 0.6, searchPoints: 3, searchRadius: 7, ambush: true,
+    finaleGuess: 1.5, finaleJitter: 0.12, finaleNear: 8,
   },
   hard: {
-    label: 'Hard', blurb: 'Dots fade faster, the signal needs longer to settle, and it is quicker.',
-    hearing: 1.25, speed: 1.1, heat: 1.2, dotLife: 14, signalStill: 1.2, tintFlesh: false, staticRange: 14, lightNotice: 18,
+    label: 'Hard', blurb: 'Dots fade faster and the signal settles slower. It reacts fast, listens hard and cuts you off.',
+    hearing: 1.25, speed: 1.1, heat: 1.2, dotLife: 14, signalStill: 1.2, tintFlesh: false, staticRange: 14,
+    lightHold: 0.45, alertTime: 0.6, lungeMax: 1.5, listen: 1.6, predict: 1, searchPoints: 5, searchRadius: 9, ambush: true,
+    finaleGuess: 1, finaleJitter: 0.06, finaleNear: 12,
   },
 };

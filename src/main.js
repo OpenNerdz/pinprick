@@ -36,6 +36,7 @@ function boot(hotData) {
   let session = null, levelIndex = 0, attract = null;
   let clock = 0, last = 0;
   let msgTimer = 0;
+  let lockHint = false;
 
   const sheets = ['title', 'paused', 'settings', 'note-sheet', 'caught', 'won'];
   const playEls = ['hud', 'reticle', 'fire', 'sweep', 'crouch', 'pause'];
@@ -45,11 +46,13 @@ function boot(hotData) {
   }
   function playUi(on) {
     for (const id of playEls) $(id).hidden = !on;
-    if (!on) { $('stick').hidden = true; $('vignette').style.opacity = 0; $('blackout').style.opacity = 0; }
+    if (!on) { $('stick').hidden = true; $('lockhint').hidden = true; lockHint = false; $('vignette').style.opacity = 0; $('blackout').style.opacity = 0; }
     if (on) hud.cache.clear();
   }
 
+  /** On-screen message. `text` may be {touch, mouse} when the wording depends on the controls. */
   function say(text, ms) {
+    if (text && typeof text === 'object') text = input.touch ? text.touch : text.mouse;
     const m = $('msg');
     m.textContent = text; m.classList.add('on');
     clearTimeout(msgTimer);
@@ -76,14 +79,21 @@ function boot(hotData) {
       [lefty ? 'Left thumb' : 'Right thumb', 'look around'],
       ['Hold scan', 'paint the dark, drag to aim. It heats up'],
       ['Sweep', 'one full picture of the room. Loud'],
-      ['Crouch', 'quiet, fits the crawls, hides you in dark corners'],
+      ['Crouch', 'beside scan: quiet, fits the crawls, hides you in dark corners'],
+    ] : input.noLock ? [
+      ['W A S D', 'walk, Shift to sprint'],
+      ['Drag', 'look around (arrow keys turn too)'],
+      ['Hold Space', 'paint the dark. It heats up'],
+      ['F or right click', 'one full picture of the room. Loud'],
+      ['C', 'crouch: quiet, fits the crawls, hides you'],
+      ['Esc or P', 'pause'],
     ] : [
       ['W A S D', 'walk, Shift to sprint'],
-      ['Mouse', 'look around'],
+      ['Mouse', 'look around (click to capture it)'],
       ['Hold click', 'paint the dark (Space works too). It heats up'],
       ['F or right click', 'one full picture of the room. Loud'],
       ['C', 'crouch: quiet, fits the crawls, hides you'],
-      ['Esc', 'pause'],
+      ['Esc or P', 'pause'],
     ];
     const html = rows.map(([k, v]) => `<li style="display:contents"><b>${k}</b><span>${v}</span></li>`).join('');
     $('how').innerHTML = html;
@@ -154,8 +164,15 @@ function boot(hotData) {
     hud.setCores(session.cores.length);
     show(null);
     playUi(true);
+    enterPlay();
+    say(def.intro || '', 6000);
+  }
+
+  /** Back into the game from a sheet: take the mouse (we are inside the button's click) and drop focus. */
+  function enterPlay() {
     app = 'play'; input.enabled = true;
-    say(def.intro ? (input.touch ? def.intro.touch : def.intro.mouse) : '', 6000);
+    document.activeElement?.blur?.();
+    input.grab();
   }
 
   function pause() {
@@ -178,7 +195,7 @@ function boot(hotData) {
     engine.init(); engine.suspend(false);
     show(null);
     playUi(true);
-    app = 'play'; input.enabled = true;
+    enterPlay();
   }
 
   function openNote(n) {
@@ -235,10 +252,10 @@ function boot(hotData) {
   click('quit', toTitle);
   click('caught-quit', toTitle);
   click('won-quit', toTitle);
-  click('retry', () => { session.respawn(); show(null); playUi(true); app = 'play'; input.enabled = true; });
+  click('retry', () => { session.respawn(); show(null); playUi(true); enterPlay(); });
   click('next', () => startLevel(levelIndex + 1));
   click('again', () => startLevel(levelIndex));
-  click('note-close', () => { show(null); app = 'play'; input.enabled = true; });
+  click('note-close', () => { show(null); enterPlay(); });
   click('pause', pause);
   const openSettings = from => { settingsFrom = from; app = 'settings'; syncForm(); $('reset-note').hidden = true; show('settings'); };
   click('open-settings', () => openSettings('title'));
@@ -270,10 +287,13 @@ function boot(hotData) {
     else if (app === 'paused' && why === 'key') resume();
   };
   input.onTouchMode = () => { stage.classList.add('touch'); renderHow(); };
+  input.onMouseMode = () => renderHow();
   if (input.touch) stage.classList.add('touch');
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) { if (app === 'play') pause(); input.releaseAll(); }
   });
+  // on a computer, clicking into another window must not leave the game running unattended
+  addEventListener('blur', () => { if (app === 'play' && !input.touch) pause(); });
   // Android app: going to the background pauses; the system back button pauses, resumes or
   // closes a sheet, and returns false on the title screen so the app can exit
   window.pinprickPause = () => pause();
@@ -308,6 +328,8 @@ function boot(hotData) {
 
     if (session) {
       const live = app === 'play' || session.state === 'caught';
+      const hint = app === 'play' && !input.touch && !input.noLock && !input.locked;
+      if (hint !== lockHint) { lockHint = hint; $('lockhint').hidden = !hint; }
       if (live) {
         clock += dt;
         const intent = input.frame(dt);

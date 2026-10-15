@@ -16,6 +16,7 @@ export class Player {
     this.moveAmt = 0; this.bob = 0; this.stepAcc = 0;
     this.still = 0;              // seconds without moving, for the signal reading
     this.hidden = false;
+    this.quiet = false;          // still and not scanning: set by the session each frame
     this.eye = EYE;
     this.probe = {x: 0, z: 0};
   }
