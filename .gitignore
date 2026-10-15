@@ -1,7 +1,8 @@
 node_modules/
-dist/
 .tmp/
-android/build/
+# APK build intermediates; the signed android/build/pinprick.apk is kept
+android/build/*
+!android/build/pinprick.apk
 
-# conversation exports
+# conversation exports dropped in the root
 *-local-command-caveat*.txt

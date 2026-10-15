@@ -22,8 +22,16 @@ charge, heat and sweep.
 npm test            # just the tests
 ```
 
-Everything is plain ES modules bundled by esbuild into one HTML file of about 140 KB with the fonts
+Everything is plain ES modules bundled by esbuild into one HTML file of about 170 KB with the fonts
 embedded, so it works offline. There is no framework and no runtime dependency.
+
+Ready-built copies are checked in: `dist/pinprick.html` (open it in any browser), `dist/artifact.html`
+(the claude.ai version) and `android/build/pinprick.apk`. Run `./build.sh` / `./build.sh apk` after a
+change to refresh them. The APK is signed with a key that lives outside the repo
+(`~/.android/pinprick.keystore`).
+
+`docs/` holds the first single-file version of the game (`original-v1.html`), screenshots from the
+smoke run (`screenshots/`, drawn on a 2D canvas, see Notes) and the development chat log.
 
 ## Layout
 
