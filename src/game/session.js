@@ -53,7 +53,7 @@ export class Session {
       this.statue.place(s.x, s.z, s.face ?? 0, s.lift ?? 0);
     }
     this.stalker = this.L.stalker && !this.demo
-      ? new Stalker(this.L.stalker, this.world, this.nav, this.diff, this.rand, this.sounds) : null;
+      ? new Stalker(this.L.stalker, this.world, this.nav, this.diff, this.rand, this.sounds, this.playerNav) : null;
     this.scares = new Scares(this);
     this.decals = buildDecals(this.world.decals);
 
@@ -132,7 +132,9 @@ export class Session {
     this.scanner.update(dt, T, intent.firing, intent.sweep, this.scanCtx(cam, view));
     if (this.scanner.overheated && !wasOver) this.ui.say('The scanner is too hot. Let go and let it cool.', 3000);
 
-    // hiding: crouched, quiet and inside a hiding spot
+    // hiding: crouched, quiet and inside a hiding spot. Quiet anywhere: not moving and not scanning,
+    // which the creature cannot hear, so it will not walk into you (but a hunt still finds you).
+    p.quiet = p.still > 0.3 && !this.scanner.active;
     p.hidden = p.crouched && !this.scanner.active && this.L.hides.some(h => Math.hypot(p.x - h.x, p.z - h.z) < h.r);
 
     this.pickups(T);
@@ -200,7 +202,8 @@ export class Session {
     let msg = this.def.exitMessage || 'All cores in. The amber door has opened.';
     if (this.stalker && this.def.finale !== false) {
       const st = this.stalker;
-      if (!st.active) st.wake(this.player, 'finale');
+      // unless it is already on you, the chase starts far from you and the exit, with a shriek
+      if (!st.active || !(st.state === 'hunt' || st.state === 'alert') || st.playerDist > 12) st.wake(this.player, 'finale', this.exit);
       st.enter('finale', this.time);
       msg += ' ' + (this.def.finaleMessage || 'It knows where you are now. Get to the door.');
     }
@@ -253,7 +256,7 @@ export class Session {
     this.fx.black = 0; this.fearBoost = 0; this.sounds.setDread(0);
     if (this.stalker) {
       const st = this.stalker, finale = st.state === 'finale';
-      st.wake(p, finale ? 'finale' : 'patrol');
+      st.wake(p, finale ? 'finale' : 'patrol', finale ? this.exit : null);
       if (finale) st.enter('finale', this.time);
     }
     this.state = 'play';

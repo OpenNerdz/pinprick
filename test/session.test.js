@@ -146,7 +146,9 @@ test('it stops beside a hidden player, and finds them the moment they stand', ()
   const it = intent(); it.crouch = true;   // stand up
   s.update(dt, t += dt, it, cam, view);
   for (let k = 0; k < 3; k++) s.update(dt, t += dt, intent(), cam, view);
-  assert.ok(st.state === 'hunt' || s.state === 'caught', `state ${st.state}`);
+  assert.ok(st.state === 'alert' || st.state === 'hunt' || s.state === 'caught', `state ${st.state}`);
+  for (; t < 4 && s.state === 'play'; t += dt) s.update(dt, t, intent(), cam, view);
+  assert.equal(s.state, 'caught', 'standing next to it, out of the hiding spot, it has you');
 });
 
 test('being caught: view snaps to it, then black, then the Caught screen', () => {

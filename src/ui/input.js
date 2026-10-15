@@ -1,6 +1,9 @@
 // Touch, mouse and keyboard turned into one per-frame intent. Gameplay reads `frame()` and never
 // sees raw events. On touch screens every pointer lands on the stage and is assigned a role by where
 // it starts: the thumbstick side, the scan button (hold and drag to aim), sweep, crouch, or look.
+// With a mouse the first click only captures the pointer (scanning makes noise, so a stray click must
+// not fire). Where the page cannot capture the pointer (some embedded viewers), dragging looks and
+// Space scans instead.
 
 import {clamp} from '../util/math.js';
 
@@ -20,6 +23,9 @@ export class Input {
     this.edges = {sweep: false, crouch: false};
     this.onPause = null;          // called with 'key' (Esc/P) or 'lock' (pointer lock lost)
     this.onTouchMode = null;      // called the first time a touch arrives on a mouse device
+    this.onMouseMode = null;      // called when pointer capture turns out to be unavailable
+    this.noLock = !canvas.requestPointerLock;
+    this.unlockedAt = -1e9; this.lockFails = 0;
     this.out = {moveX: 0, moveY: 0, sprint: false, lookX: 0, lookY: 0, firing: false, sweep: false, crouch: false};
     this.bind();
   }
@@ -36,8 +42,25 @@ export class Input {
     st.addEventListener('contextmenu', e => e.preventDefault());
     st.addEventListener('touchmove', e => { if (this.enabled) e.preventDefault(); }, {passive: false});
     document.addEventListener('pointerlockchange', () => {
-      if (!this.locked && this.enabled && !this.touch && this.onPause) this.onPause('lock');
+      if (this.locked) { this.lockFails = 0; return; }
+      this.unlockedAt = performance.now();
+      if (this.enabled && !this.touch && this.onPause) this.onPause('lock');
     });
+    // refused twice, well clear of the browser's short re-lock cooldown: this page cannot capture it
+    document.addEventListener('pointerlockerror', () => {
+      if (this.noLock || performance.now() - this.unlockedAt < 1500 || ++this.lockFails < 2) return;
+      this.noLock = true;
+      this.onMouseMode?.();
+    });
+    // alt-tab and the like: keys released elsewhere never send keyup, so let go of everything
+    addEventListener('blur', () => this.releaseAll());
+  }
+
+  /** Capture the mouse for looking. Only works inside a click or key press; harmless otherwise. */
+  grab() {
+    if (this.touch || this.noLock || this.locked) return;
+    if (navigator.userActivation && !navigator.userActivation.isActive) return;
+    try { const r = this.canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (err) { /* reported by pointerlockerror */ }
   }
 
   key(e, down) {
@@ -47,15 +70,26 @@ export class Input {
     if (e.code === 'Escape' || e.code === 'KeyP') { this.onPause?.('key'); return; }
     if (!this.enabled) return;
     if (e.code === 'KeyF' || e.code === 'KeyE') this.edges.sweep = true;
-    if (e.code === 'KeyC' || e.code === 'ControlLeft') this.edges.crouch = true;
+    // not Ctrl: Ctrl+W closes the browser tab and no page can stop it
+    if (e.code === 'KeyC') this.edges.crouch = true;
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
   }
 
-  hitButton(el, x, y, scale = 0.72) {
-    if (!el || el.hidden) return false;
-    const r = el.getBoundingClientRect();
-    if (!r.width) return false;
-    return Math.hypot(x - r.left - r.width / 2, y - r.top - r.height / 2) < r.width * scale;
+  /**
+   * The touch pad under (x, y), or null. Each pad answers a little beyond its drawn edge, and where two
+   * of those margins meet the nearer pad wins, so a thumb on the edge of SCAN never fires the sweep.
+   */
+  padAt(x, y) {
+    let best = null, bd = 0.72;
+    for (const name of ['fire', 'sweep', 'crouch']) {
+      const el = this.els[name];
+      if (!el || el.hidden) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width) continue;
+      const d = Math.hypot(x - r.left - r.width / 2, y - r.top - r.height / 2) / r.width;
+      if (d < bd) { bd = d; best = name; }
+    }
+    return best;
   }
 
   down(e) {
@@ -64,18 +98,19 @@ export class Input {
     try { this.stage.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     let role = 'look';
     if (e.pointerType === 'mouse') {
-      if (e.button === 2) this.edges.sweep = true; else { role = 'fire'; this.fireCount++; }
-      if (!this.locked) {
-        try { const r = this.canvas.requestPointerLock?.(); if (r && r.catch) r.catch(() => {}); } catch (err) { /* optional */ }
-      }
+      // the click that captures the mouse does nothing else
+      if (!this.locked && !this.noLock) { this.grab(); return; }
+      if (e.button === 2) this.edges.sweep = true;
+      else if (!this.noLock) { role = 'fire'; this.fireCount++; } // without capture, left-drag looks
     } else {
       if (!this.touch) { this.touch = true; this.onTouchMode?.(); }
       const s = this.stage.getBoundingClientRect(), x = e.clientX, y = e.clientY;
       const leftHanded = this.settings.swap;
       const inStickZone = leftHanded ? x - s.left > s.width * 0.55 : x - s.left < s.width * 0.45;
-      if (this.hitButton(this.els.sweep, x, y)) this.edges.sweep = true;
-      else if (this.hitButton(this.els.crouch, x, y)) this.edges.crouch = true;
-      else if (this.hitButton(this.els.fire, x, y)) { role = 'fire'; this.fireCount++; }
+      const pad = this.padAt(x, y);
+      if (pad === 'sweep') this.edges.sweep = true;
+      else if (pad === 'crouch') this.edges.crouch = true;
+      else if (pad === 'fire') { role = 'fire'; this.fireCount++; }
       else if (inStickZone && this.stickId === null) {
         role = 'stick'; this.stickId = e.pointerId;
         const st = this.els.stick;

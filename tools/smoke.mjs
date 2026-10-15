@@ -171,7 +171,7 @@ const place = (p, x, z, yaw, pitch = 0) => p.evaluate(([x, z, yaw, pitch]) => {
   // level 2: the creature standing in the hall, then on all fours, each shown by a sweep
   await p.click('#levels button[data-i="1"]');
   await p.click('#go'); await sleep(300);
-  await p.evaluate(() => { const g = window.__pinprick, s = g.session, st = s.stalker; g.renderer.dots.clear(); st.wake(); st.x = 17; st.z = 20.2; st.face = Math.PI; st.enter('wait', 0); st.timer = 99; st.hear = () => {}; st.diff = {...st.diff, lightNotice: 1e9}; s.scanner.cooldown = 0; });
+  await p.evaluate(() => { const g = window.__pinprick, s = g.session, st = s.stalker; g.renderer.dots.clear(); st.wake(); st.x = 17; st.z = 20.2; st.face = Math.PI; st.enter('wait', 0); st.timer = 99; st.hear = () => {}; st.diff = {...st.diff, lightHold: 1e9}; s.scanner.cooldown = 0; });
   await place(p, 17, 24.6, 0, 0.12);
   await p.keyboard.press('KeyF'); await sleep(3200);
   await shot(p, 'd09-creature-standing');
