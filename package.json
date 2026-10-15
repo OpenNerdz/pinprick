@@ -1,0 +1,16 @@
+{
+  "name": "pinprick",
+  "version": "2.0.0",
+  "description": "A horror game you can only see through scanner dots",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "test": "node --test 'test/*.test.js'",
+    "smoke": "node tools/smoke.mjs"
+  },
+  "type": "module",
+  "devDependencies": {
+    "esbuild": "^0.25.10",
+    "playwright-core": "^1.63.0"
+  },
+  "private": true
+}

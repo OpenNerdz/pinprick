@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.tmp/
+android/build/
+
+# conversation exports
+*-local-command-caveat*.txt
