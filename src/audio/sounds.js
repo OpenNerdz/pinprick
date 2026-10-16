@@ -37,20 +37,23 @@ export class Sounds {
 
   get ok() { return !!this.e.ctx; }
 
-  /** Render the bank and start the continuous voices (the scanner's motor and dots, room tone, dread). */
+  /** Render the bank and start the continuous voices (the scanner's purr, room tone, dread). */
   start() {
     if (!this.ok || this.hum) return;
     const c = this.e.ctx, e = this.e, b = this.bank = new Bank(c, RECIPES);
     const loop = (name, rate = 1) => { const s = c.createBufferSource(); s.buffer = b.get(name); s.loop = true; s.playbackRate.value = rate; s.start(); return s; };
     const gain = v => { const g = c.createGain(); g.gain.value = v; return g; };
-    // the scanner: a motor turning its mirror (its playback rate is its speed, so it spins up with the
-    // charge and winds down after you let go) and the fizz of the dots landing, on and off with the laser
-    const out = gain(1), motor = loop('motor', 0.1), mg = gain(0), spray = loop('spray'), sf = c.createBiquadFilter(), sg = gain(0);
-    sf.type = 'lowpass'; sf.frequency.value = 3000;
-    motor.connect(mg); mg.connect(out); spray.connect(sf); sf.connect(sg); sg.connect(out);
-    out.connect(e.sfx);
-    const room = gain(0.12); out.connect(room); room.connect(e.revIn);
-    this.hum = {motor, mg, spray, sf, sg};
+    // the scanner's purr (the game's original): two voices a fifth apart with a tremolo that speeds up
+    // as it spins up
+    const o1 = c.createOscillator(); o1.type = 'triangle'; o1.frequency.value = 140;
+    const o2 = c.createOscillator(); o2.type = 'sine'; o2.frequency.value = 210;
+    const g2 = gain(0.5), f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 500; f.Q.value = 2;
+    const trem = gain(0.62), lfo = c.createOscillator(); lfo.frequency.value = 11;
+    const lg = gain(0.38), out = gain(0);
+    o1.connect(f); o2.connect(g2); g2.connect(f); f.connect(trem); lfo.connect(lg); lg.connect(trem.gain);
+    trem.connect(out); out.connect(e.sfx); out.connect(e.slap);
+    o1.start(); o2.start(); lfo.start();
+    this.hum = {o1, o2, f, lfo, out};
     // room tone: rock, plant and moving air
     const bed = loop('bed'), bg = gain(0);
     bed.connect(bg); bg.connect(e.amb);
@@ -118,39 +121,48 @@ export class Sounds {
   updateHum(firing, charge, heat, interference = 0) {
     if (!this.hum) return;
     const h = this.hum, t = this.e.now;
-    // the motor has weight: it follows the charge up, and takes a second or two to wind down. Hot, it
-    // labours; near the creature, it stumbles and the dots break up
-    const strain = heat > 0.8 ? (heat - 0.8) * 5 : 0, jam = interference * (Math.random() - 0.5);
-    if (firing) {
-      const wobble = 0.006 * (Math.random() - 0.5);
-      h.motor.playbackRate.setTargetAtTime(Math.max(0.1, 0.45 + 0.6 * charge + wobble + strain * 0.08 * (Math.random() - 0.6) + jam * 0.15), t, 0.08);
-      h.mg.gain.setTargetAtTime(0.018 * (0.6 + 0.4 * charge) * (1 + strain * 0.5), t, 0.05);
-    } else {
-      h.motor.playbackRate.setTargetAtTime(0.1, t, 0.55);
-      h.mg.gain.setTargetAtTime(0, t, 0.4);
-    }
-    const drop = interference > 0.2 && Math.random() < interference * 0.35;
-    h.spray.playbackRate.setTargetAtTime(Math.max(0.3, 0.75 + 0.6 * charge + jam), t, 0.04);
-    h.sf.frequency.setTargetAtTime(2600 + 5500 * charge + jam * 2000, t, 0.05);
-    h.sg.gain.setTargetAtTime(firing && !drop ? 0.014 + 0.016 * charge : 0, t, firing ? 0.02 : 0.03);
+    // hot, it wobbles; near the creature, interference shakes it
+    const wobble = (heat > 0.8 ? (heat - 0.8) * 60 : 0) + interference * (Math.random() - 0.5) * 120;
+    h.out.gain.setTargetAtTime(firing ? 0.03 + 0.03 * charge : 0, t, firing ? 0.04 : 0.09);
+    h.o1.frequency.setTargetAtTime(140 + 250 * charge - wobble, t, 0.06);
+    h.o2.frequency.setTargetAtTime((140 + 250 * charge) * 1.5 + wobble, t, 0.06);
+    h.f.frequency.setTargetAtTime(480 + 1700 * charge, t, 0.06);
+    h.lfo.frequency.setTargetAtTime(11 + 33 * charge + interference * 20, t, 0.06);
   }
-  trigger() { this.play('trigger', {gain: 0.04, rev: 0.05}); }
+  trigger() { this.e.tone(330, 0.025, 0.07, {echo: false}); }
   coreBell() { const dev = this.e.dev; this.e.tone(1318.5, 0.03, 0.6, {bus: dev, echo: false}); this.e.tone(1975.5, 0.015, 0.5, {at: 0.04, bus: dev, echo: false}); }
   heatWarn() { this.e.tone(3150, 0.008, 0.05, {type: 'square', bus: this.e.dev, echo: false}); }
   overheat() { this.play('overheat', {gain: 0.25, rev: 0.25}); }
   cooled() {
-    this.play('trigger', {gain: 0.035, rate: 0.8});
+    this.play('switch', {gain: 0.035, rate: 0.8});
     this.e.tone(1046.5, 0.016, 0.12, {type: 'square', at: 0.1, bus: this.e.dev, echo: false});
     this.e.tone(1568, 0.016, 0.16, {type: 'square', at: 0.22, bus: this.e.dev, echo: false});
   }
   denied() { this.e.tone(380, 0.014, 0.1, {type: 'square', bus: this.e.dev, echo: false}); }
 
-  sweep(dur) { if (this.bank) this.e.play(this.bank.get('sweep', dur), {gain: 0.28, rev: 0.35}); }
-  sweepEnd() { this.play('sweepEnd', {gain: 0.07, rev: 0.2}); }
-  sweepReady() {
-    this.e.tone(783.99, 0.02, 0.25, {type: 'square', bus: this.e.dev, echo: false});
-    this.e.tone(1174.66, 0.018, 0.35, {type: 'square', at: 0.11, bus: this.e.dev, echo: false});
+  /** The sweep (the game's original): two tones and a band of noise falling with it down the view. */
+  sweep(dur) {
+    if (!this.ok) return;
+    const e = this.e, c = e.ctx, t = c.currentTime;
+    const env = c.createGain();
+    env.gain.setValueAtTime(0.0001, t); env.gain.linearRampToValueAtTime(1, t + 0.08);
+    env.gain.setValueAtTime(1, t + dur - 0.1); env.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.35);
+    const o1 = c.createOscillator(); o1.type = 'triangle'; o1.frequency.setValueAtTime(1046.5, t); o1.frequency.exponentialRampToValueAtTime(130.8, t + dur);
+    const o2 = c.createOscillator(); o2.frequency.setValueAtTime(1568, t); o2.frequency.exponentialRampToValueAtTime(196, t + dur);
+    const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(2000, t); f.frequency.exponentialRampToValueAtTime(600, t + dur);
+    const g1 = c.createGain(); g1.gain.value = 0.042; const g2 = c.createGain(); g2.gain.value = 0.018;
+    o1.connect(g1); o2.connect(g2); g1.connect(f); g2.connect(f); f.connect(env);
+    const n = c.createBufferSource(); n.buffer = e.noiseBuf; n.loop = true;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.3;
+    bp.frequency.setValueAtTime(4200, t); bp.frequency.exponentialRampToValueAtTime(500, t + dur);
+    const gn = c.createGain(); gn.gain.value = 0.022;
+    n.connect(bp); bp.connect(gn); gn.connect(env);
+    env.connect(e.sfx); env.connect(e.slap);
+    o1.start(t); o2.start(t); n.start(t);
+    o1.stop(t + dur + 0.5); o2.stop(t + dur + 0.5); n.stop(t + dur + 0.5);
   }
+  sweepEnd() { this.e.noise(0.045, 0.25, {freq: 260}); }
+  sweepReady() { this.e.tone(783.99, 0.03, 0.4, {echo: false, slap: true}); this.e.tone(1174.66, 0.025, 0.5, {at: 0.09, echo: false, slap: true}); }
 
   // ---------------------------------------------------------------- you
   step(kind) {
@@ -215,7 +227,7 @@ export class Sounds {
     this.e.noise(0.03, 0.02, {freq: 1200, at: 0.3, bus: this.e.dev, echo: false});
   }
   /** Raising a dead one: just the switch. */
-  trackerClick() { this.play('trigger', {gain: 0.04, rate: 0.7}); }
+  trackerClick() { this.play('switch', {gain: 0.04, rate: 0.7}); }
   /** A battery snapped in: two clacks and the charge whining up. */
   battery() { this.play('battery', {gain: 0.06, bus: this.e.dev}); }
 

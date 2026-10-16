@@ -5,8 +5,8 @@
 //
 // The models, roughly: struck things ring as a handful of decaying modes (a boot on concrete, a steel
 // door, a pipe, a pebble); dragged things are stick-slip pulses through the same; the creature's voice
-// is a throat (glottal pulses with jitter, period doubling and breath, through moving formants); the
-// scanner is a motor turning a mirror over a fizz of dots landing.
+// is a throat (glottal pulses with jitter, period doubling and breath, through moving formants). The
+// scanner's purr and sweep are not here: they are the game's original oscillator sounds (sounds.js).
 
 import {Filter, Mode, Body, strike, burst, grit, mix, friction, throat, norm, edges, loopify, dcBlock, chain, TAU} from './dsp.js';
 
@@ -15,44 +15,8 @@ const done = (a, sr, outMs = 30) => edges(norm(dcBlock(a, sr, 30)), sr, 0.5, out
 
 // ---------------------------------------------------------------- the scanner
 
-/**
- * The motor: 20 turns a second at full speed, so a 1 s loop of whole-hertz partials is seamless. Its
- * harmonics drift in and out a little, and the stator sings two notes that are not in the series.
- */
-function motor(sr, r) {
-  const n = sr, fade = Math.floor(sr * 0.06), a = new Float32Array(n), air = new Float32Array(n + fade);
-  const parts = [[240, 1], [480, 0.34], [720, 0.16], [960, 0.08], [1440, 0.05], [1680, 0.035], [1913, 0.025], [3187, 0.012], [3360, 0.02]];
-  const ph = parts.map(() => r() * TAU), drift = parts.map(() => [r.int(1, 4), r() * TAU, r.range(0.1, 0.3)]);
-  for (let i = 0; i < n; i++) {
-    const t = i / sr;
-    let y = 0;
-    for (let k = 0; k < parts.length; k++) y += parts[k][1] * Math.sin(TAU * parts[k][0] * t + ph[k]) * (1 + drift[k][2] * Math.sin(TAU * drift[k][0] * t + drift[k][1]));
-    a[i] = y * (1 + 0.1 * Math.sin(TAU * 20 * t)) * 0.5; // the mirror is not quite balanced: a wobble each turn
-  }
-  // the air it beats, a soft whoosh each turn
-  const f1 = new Filter(sr, 'bp', 1800, 1.1), f2 = new Filter(sr, 'hp', 800, 0.7);
-  for (let i = 0; i < n + fade; i++) air[i] = f2.run(f1.run(r.white())) * (0.45 + 0.55 * Math.max(0, Math.sin(TAU * 20 * i / sr + 1)) ** 2);
-  mix(a, loopify(air, fade), 0, 0.7);
-  return norm(a, 0.9);
-}
-
-/** The dots landing: a fine dry fizz of grains, like sand thrown on a sheet, over a breath of hiss. */
-function spray(sr, r) {
-  const n = Math.floor(sr * 1.5), fade = Math.floor(sr * 0.08), a = new Float32Array(n + fade);
-  for (let t = 0; ;) {
-    t += -Math.log(1 - r()) * sr / 1700;
-    const i = Math.floor(t);
-    if (i >= a.length - 40) break;
-    const g = 0.15 + 0.85 * r() ** 3, w = 1 + r() * 4;
-    for (let j = 0; j < w * 6; j++) a[i + j] += r.white() * g * Math.exp(-j / w);
-  }
-  for (let i = 0; i < a.length; i++) a[i] += r.white() * 0.05;
-  chain(a, new Filter(sr, 'hp', 1100, 0.7), new Filter(sr, 'peak', 3200, 0.9, 4), new Filter(sr, 'lp', 8500, 0.7));
-  return norm(loopify(a, fade), 0.9);
-}
-
-/** The trigger's switch: a hard plastic clack, and a softer one as the contact settles. */
-function trigger(sr, r) {
+/** A switch or relay: a hard plastic clack, and a softer one as the contact settles. */
+function switchClick(sr, r) {
   const a = buf(sr, 0.09);
   const body = () => new Body(sr, [[r.range(2900, 3400), 0.012, 1], [r.range(4800, 5600), 0.008, 0.6], [r.range(1150, 1400), 0.02, 0.45], [r.range(170, 210), 0.035, 0.7]]);
   strike(a, sr, r, body(), 0, 1, 0.6, 0.09);
@@ -75,50 +39,6 @@ function overheat(sr, r) {
     strike(a, sr, r, new Body(sr, [[r.range(3800, 6500), 0.006, 1], [r.range(1500, 2200), 0.01, 0.3]]), Math.floor(r.range(0.6, 2.7) * sr), r.range(0.05, 0.14), 0.2, 0.05);
   }
   return done(a, sr, 60);
-}
-
-/**
- * The sweep: a capacitor whines up, the shot thumps through the casing, then the mirror steps down the
- * view row by row (a stepper motor's buzz, falling as it goes, ratcheting each row) over a downpour of dots.
- */
-function sweep(sr, r, i, dur = 2.6) {
-  const a = buf(sr, dur + 0.4);
-  let ph = 0;
-  for (let j = 0; j < 0.2 * sr; j++) {
-    const t = j / sr;
-    ph += TAU * 1400 * Math.pow(5.5, t / 0.2) / sr;
-    a[j] += Math.sin(ph) * 0.1 * Math.min(1, t / 0.05) * (1 - t / 0.2);
-  }
-  const t0 = Math.floor(0.19 * sr);
-  strike(a, sr, r, new Body(sr, [[58, 0.4, 1], [121, 0.22, 0.5], [262, 0.1, 0.3], [740, 0.04, 0.2]]), t0, 1, 2, 0.7);
-  burst(a, sr, r, 0.19, 0.5, 0.0005, 0.006, [new Filter(sr, 'hp', 1200, 0.7)]);
-  const hous = new Body(sr, [[820, 0.012, 1], [2300, 0.006, 0.5], [4100, 0.004, 0.3]]);
-  const hp = new Filter(sr, 'hp', 1500, 0.7), lp = new Filter(sr, 'lp', 7500, 0.7);
-  let next = 0.22 * sr;
-  for (let j = Math.floor(0.22 * sr); j < a.length; j++) {
-    const t = j / sr, p = Math.min(1, (t - 0.22) / (dur - 0.22));
-    const env = Math.min(1, (t - 0.22) / 0.05) * (t < dur ? 1 : Math.exp(-(t - dur) / 0.08));
-    const row = 0.55 + 0.45 * Math.sqrt(Math.abs(Math.sin(Math.PI * 11.5 * t)));
-    let x = 0;
-    if (j >= next) { x = 1; next = j + sr / (190 - 70 * p); }
-    a[j] += hous.run(x * env * row) * 0.3;
-    const g = r() < 4500 / sr ? r.white() * (0.3 + r()) * 2 : 0;
-    a[j] += lp.run(hp.run(g + r.white() * 0.08)) * env * row * 0.55;
-  }
-  return done(a, sr, 30);
-}
-
-/** The mirror swinging back to the top and parking: a quick whirr, then a clunk. */
-function sweepEnd(sr, r) {
-  const a = buf(sr, 0.5);
-  let ph = 0;
-  for (let j = 0; j < 0.14 * sr; j++) {
-    const t = j / sr;
-    ph += TAU * (300 + 900 * t / 0.14) / sr;
-    a[j] += (Math.sin(ph) + 0.4 * Math.sin(ph * 3)) * 0.12 * Math.sin(Math.PI * t / 0.14);
-  }
-  strike(a, sr, r, new Body(sr, [[118, 0.12, 1], [265, 0.07, 0.5], [610, 0.04, 0.35], [1900, 0.012, 0.25]]), Math.floor(0.14 * sr), 1, 1, 0.35);
-  return done(a, sr, 20);
 }
 
 // ---------------------------------------------------------------- you
@@ -351,10 +271,10 @@ function whistle(a, sr, r, t0, f0, f1, dur, amp) {
 /** It copies your sounds with its throat, slightly wrong: the tracker's tick, a ping, the core chime, the trigger. */
 function mimic(kind) {
   return (sr, r) => {
-    if (kind === 'trigger') {
+    if (kind === 'trigger') { // your trigger's beep, twice, flat
       const a = buf(sr, 0.5);
-      for (const t of [0, 0.23]) strike(a, sr, r, new Body(sr, [[r.range(1800, 2400), 0.008, 0.6], [r.range(500, 700), 0.03, 1], [220, 0.03, 0.4]]), Math.floor(t * sr), 1, 0.6, 0.1);
-      mix(a, throat(sr, r, {dur: 0.2, f0: 30, jitter: 0.25, shimmer: 0.4, oq: 0.3, voice: 1, breath: 0.2, vowels: 'oa', scale: 0.72}), Math.floor(0.3 * sr), 0.4);
+      whistle(a, sr, r, 0, 318, 312, 0.1, 1); whistle(a, sr, r, 0.23, 305, 298, 0.1, 1);
+      mix(a, throat(sr, r, {dur: 0.15, f0: 30, jitter: 0.25, shimmer: 0.4, oq: 0.3, voice: 1, breath: 0.2, vowels: 'oa', scale: 0.72}), Math.floor(0.35 * sr), 0.3);
       return done(a, sr, 30);
     }
     if (kind === 'ping') { const a = buf(sr, 0.8); whistle(a, sr, r, 0, 958, 900, 0.6, 1); whistle(a, sr, r, 0, 1877, 1700, 0.4, 0.2); return done(a, sr, 40); }
@@ -526,12 +446,8 @@ function wind(sr, r) {
 }
 
 export const RECIPES = {
-  motor: {loop: true, make: motor},
-  spray: {loop: true, make: spray},
-  trigger: {n: 3, make: trigger},
+  switch: {n: 3, make: switchClick},
   overheat: {n: 2, make: overheat},
-  sweep: {make: sweep},
-  sweepEnd: {make: sweepEnd},
   stepWalk: {n: 8, make: footstep('walk')},
   stepSprint: {n: 8, make: footstep('sprint')},
   stepCrouch: {n: 6, make: footstep('crouch')},

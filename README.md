@@ -47,8 +47,8 @@ charges, the fins glow as it heats, and the screen on its back shows charge, hea
 
 **Sound.** Everything is synthesised from physical models when the game starts, a few variants of
 each, so nothing repeats exactly:
-- **The scanner:** its motor spins up with the charge and winds down after you let go, over a fine
-  fizz of dots landing.
+- **The scanner** keeps the game's original sounds: a purr that rises and quickens as it charges, and
+  the sweep's falling tones.
 - **Footsteps and impacts:** your boots crunch grit on concrete, doors and pipes ring like steel.
 - **The creature:** its voice is a model of a throat, so it groans and breaks into a creak, its clicks
   are wet, and its breath rattles in and out.

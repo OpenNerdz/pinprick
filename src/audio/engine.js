@@ -45,6 +45,12 @@ export class AudioEngine {
     this.revIn.connect(this.rev); this.rev.connect(revOut); revOut.connect(this.world);
     // `echo` is a little of the room on sounds that ask for it
     this.echo = c.createGain(); this.echo.gain.value = 0.3; this.echo.connect(this.revIn);
+    // `slap`: the game's original short repeating echo, which the scanner's purr and sweep keep
+    const dl = c.createDelay(1); dl.delayTime.value = 0.23;
+    const fb = c.createGain(); fb.gain.value = 0.36;
+    const slp = c.createBiquadFilter(); slp.type = 'lowpass'; slp.frequency.value = 1700;
+    this.slap = c.createGain(); this.slap.gain.value = 0.32;
+    this.slap.connect(dl); dl.connect(slp); slp.connect(fb); fb.connect(dl); slp.connect(this.world);
     // your devices' speaker: tinny, a resonance in the upper mids, breaking up a little when pushed
     this.dev = c.createGain(); this.dev.gain.value = 0.6;
     const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 420; hp.Q.value = 0.8;
@@ -115,7 +121,7 @@ export class AudioEngine {
 
   /**
    * Route a voice out. o: {bus, pos ({pan, front} from place(): placed in 3D round your head, so behind
-   * sounds behind), pan (simple left/right), echo, rev (reverb send)}.
+   * sounds behind), pan (simple left/right), echo, slap, rev (reverb send)}.
    */
   out(node, o) {
     let n = node;
@@ -131,6 +137,7 @@ export class AudioEngine {
     }
     n.connect(o.bus || this.sfx);
     if (o.echo) n.connect(this.echo);
+    if (o.slap) n.connect(this.slap);
     if (o.rev) { const s = this.ctx.createGain(); s.gain.value = o.rev; n.connect(s); s.connect(this.revIn); }
   }
 

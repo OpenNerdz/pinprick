@@ -16,17 +16,16 @@ export class Bank {
     this.cache = new Map();
   }
 
-  /** Every variant of a sound; `arg` (a sweep's length) makes a separate set. */
-  all(name, arg) {
-    const key = arg === undefined ? name : name + '|' + arg;
-    let v = this.cache.get(key);
-    if (!v) { v = this.render(name, arg); this.cache.set(key, v); }
+  /** Every variant of a sound. */
+  all(name) {
+    let v = this.cache.get(name);
+    if (!v) { v = this.render(name); this.cache.set(name, v); }
     return v;
   }
 
   /** One variant at random, never the same one twice running. */
-  get(name, arg) {
-    const v = this.all(name, arg);
+  get(name) {
+    const v = this.all(name);
     if (v.length < 2) return v[0];
     let k = Math.floor(Math.random() * (v.length - 1));
     if (k >= v.last) k++;
@@ -34,12 +33,12 @@ export class Bank {
     return v[k];
   }
 
-  render(name, arg) {
+  render(name) {
     const R = this.recipes[name];
     if (!R) throw new Error('no sound called ' + name);
     const sr = Math.round(this.ctx.sampleRate * (R.rate || 1)), out = [];
     for (let i = 0; i < (R.n || 1); i++) {
-      const d = R.make(sr, rand(seedOf(name, i)), i, arg), ch = Array.isArray(d) ? d : [d];
+      const d = R.make(sr, rand(seedOf(name, i)), i), ch = Array.isArray(d) ? d : [d];
       const b = this.ctx.createBuffer(ch.length, ch[0].length, sr);
       ch.forEach((c, k) => b.getChannelData(k).set(c));
       out.push(b);
