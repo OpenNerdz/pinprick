@@ -1,5 +1,6 @@
-// Level 1. Teaches scanning, the sweep, crouching through a crawl, notes and the old operator's dots.
-// Nothing hunts you here yet; the level ends with footsteps that are not yours.
+// Level 1. Teaches scanning, the sweep, crouching through a crawl, notes, the old operator's dots and
+// the motion tracker. Nothing hunts you here yet; the level ends with footsteps that are not yours,
+// which the tracker shows walking past behind the wall.
 // One map cell is 2 m: cell (cx, cz) covers x 2cx..2cx+2, z 2cz..2cz+2.
 
 import {box, cyl} from '../world/shapes.js';
@@ -56,8 +57,12 @@ export default {
     {x: 15, z: 5, r: 1.6, actions: [['say', {touch: 'Tap SWEEP for one full picture of the room. It needs 30 s to recharge.', mouse: 'Press F or right click for one full picture of the room. It needs 30 s to recharge.'}, 6000]]},
     {x: 27, z: 7, r: 2.2, actions: [['say', {touch: 'The way on is low. Tap CROUCH to fit through.', mouse: 'The way on is low. Press C to crouch and fit through.'}, 5000]]},
     {x: 6, z: 15.5, r: 2.5, actions: [['say', 'Rust-coloured dots are old. Someone was here before you.', 5000]]},
-    {x: 9, z: 24, r: 7, cores: 2, delay: 1.2, actions: [['silence', 7], ['steps', 16, 21, 3, 21, 11], ['say', 'Footsteps. Not yours.', 4000]]},
+    {x: 9, z: 24, r: 7, cores: 2, delay: 1.2, actions: [['silence', 7], ['steps', 16, 21, 3, 21, 11],
+      ['say', {touch: 'Footsteps. Not yours. Tap TRACK and watch.', mouse: 'Footsteps. Not yours. Press Q and watch.'}, 5000]]},
   ],
   hides: [],
+  // the motion tracker lies on the floor by the way into the hall, half charged; a battery waits in it
+  tracker: {x: 11, z: 19.2, battery: 0.5},
+  batteries: {spots: [[16.8, 22.8]]},
   stalker: null,
 };

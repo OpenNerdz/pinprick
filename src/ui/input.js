@@ -1,6 +1,7 @@
 // Touch, mouse and keyboard turned into one per-frame intent. Gameplay reads `frame()` and never
 // sees raw events. On touch screens every pointer lands on the stage and is assigned a role by where
-// it starts: the thumbstick side, the scan button (hold and drag to aim), sweep, crouch, or look.
+// it starts: the thumbstick side, the scan button (hold and drag to aim), sweep, crouch, the motion
+// tracker, or look.
 // With a mouse the first click only captures the pointer (scanning makes noise, so a stray click must
 // not fire). Where the page cannot capture the pointer (some embedded viewers), dragging looks and
 // Space scans instead.
@@ -20,13 +21,13 @@ export class Input {
     this.fireCount = 0;
     this.stickId = null; this.stickX = 0; this.stickY = 0; this.stickFar = false;
     this.lookX = 0; this.lookY = 0;
-    this.edges = {sweep: false, crouch: false};
+    this.edges = {sweep: false, crouch: false, track: false};
     this.onPause = null;          // called with 'key' (Esc/P) or 'lock' (pointer lock lost)
     this.onTouchMode = null;      // called the first time a touch arrives on a mouse device
     this.onMouseMode = null;      // called when pointer capture turns out to be unavailable
     this.noLock = !canvas.requestPointerLock;
     this.unlockedAt = -1e9; this.lockFails = 0;
-    this.out = {moveX: 0, moveY: 0, sprint: false, lookX: 0, lookY: 0, firing: false, sweep: false, crouch: false};
+    this.out = {moveX: 0, moveY: 0, sprint: false, lookX: 0, lookY: 0, firing: false, sweep: false, crouch: false, track: false};
     this.bind();
   }
 
@@ -72,6 +73,7 @@ export class Input {
     if (e.code === 'KeyF' || e.code === 'KeyE') this.edges.sweep = true;
     // not Ctrl: Ctrl+W closes the browser tab and no page can stop it
     if (e.code === 'KeyC') this.edges.crouch = true;
+    if (e.code === 'KeyQ') this.edges.track = true;
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
   }
 
@@ -81,7 +83,7 @@ export class Input {
    */
   padAt(x, y) {
     let best = null, bd = 0.72;
-    for (const name of ['fire', 'sweep', 'crouch']) {
+    for (const name of ['fire', 'sweep', 'crouch', 'track']) {
       const el = this.els[name];
       if (!el || el.hidden) continue;
       const r = el.getBoundingClientRect();
@@ -101,6 +103,7 @@ export class Input {
       // the click that captures the mouse does nothing else
       if (!this.locked && !this.noLock) { this.grab(); return; }
       if (e.button === 2) this.edges.sweep = true;
+      else if (e.button === 1) this.edges.track = true; // middle click: the tracker
       else if (!this.noLock) { role = 'fire'; this.fireCount++; } // without capture, left-drag looks
     } else {
       if (!this.touch) { this.touch = true; this.onTouchMode?.(); }
@@ -110,6 +113,7 @@ export class Input {
       const pad = this.padAt(x, y);
       if (pad === 'sweep') this.edges.sweep = true;
       else if (pad === 'crouch') this.edges.crouch = true;
+      else if (pad === 'track') this.edges.track = true;
       else if (pad === 'fire') { role = 'fire'; this.fireCount++; }
       else if (inStickZone && this.stickId === null) {
         role = 'stick'; this.stickId = e.pointerId;
@@ -164,7 +168,7 @@ export class Input {
     this.fireCount = 0;
     for (const k in this.keys) this.keys[k] = false;
     this.lookX = this.lookY = 0;
-    this.edges.sweep = this.edges.crouch = false;
+    this.edges.sweep = this.edges.crouch = this.edges.track = false;
   }
 
   exitLock() { if (this.locked) document.exitPointerLock(); }
@@ -185,8 +189,8 @@ export class Input {
     o.sprint = !!(k.ShiftLeft || k.ShiftRight) || this.stickFar;
     o.lookX = this.lookX; o.lookY = this.lookY; this.lookX = this.lookY = 0;
     o.firing = this.fireCount > 0 || !!k.Space;
-    o.sweep = this.edges.sweep; o.crouch = this.edges.crouch;
-    this.edges.sweep = this.edges.crouch = false;
+    o.sweep = this.edges.sweep; o.crouch = this.edges.crouch; o.track = this.edges.track;
+    this.edges.sweep = this.edges.crouch = this.edges.track = false;
     o.lookY = clamp(o.lookY, -1, 1);
     return o;
   }

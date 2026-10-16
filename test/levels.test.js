@@ -7,7 +7,7 @@ import {LEVELS} from '../src/levels/index.js';
 import {compileLevel, CORE_PICKUP, EXIT_RADIUS, NOTE_PICKUP} from '../src/world/level.js';
 import {NavGrid} from '../src/world/nav.js';
 import {collide} from '../src/world/collision.js';
-import {CELL, PLAYER_R} from '../src/config.js';
+import {CELL, PLAYER_R, TRACKER} from '../src/config.js';
 
 const FACES = {n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0]};
 
@@ -38,6 +38,9 @@ for (const def of LEVELS) {
         assert.ok(isFinite(f[nav.index(L.start.x, L.start.z)]), 'start is walkable');
         for (const c of L.cores) assert.ok(reachableWithin(nav, f, c.x, c.z, CORE_PICKUP - 0.05), `core at ${c.x},${c.z} (seed ${seed}, doors ${open ? 'open' : 'shut'})`);
         for (const n of L.notes) assert.ok(reachableWithin(nav, f, n.x, n.z, NOTE_PICKUP - 0.05), `note "${n.title}"`);
+        // every battery spot (compiled with no count, so all of them are placed) and the tracker itself
+        for (const b of L.batteries) assert.ok(reachableWithin(nav, f, b.x, b.z, TRACKER.pickupR - 0.05), `battery at ${b.x},${b.z} (doors ${open ? 'open' : 'shut'})`);
+        if (L.tracker) assert.ok(reachableWithin(nav, f, L.tracker.x, L.tracker.z, TRACKER.pickupR - 0.05), 'the tracker');
         if (L.exitDoor) {
           L.exitDoor.on = false;
           const nav2 = new NavGrid(L.world, {radius: PLAYER_R, minH: 1.2});
@@ -74,6 +77,19 @@ for (const def of LEVELS) {
       }
     }
     if (L.statue) open(L.statue.x, L.statue.z, 'statue');
+    // a battery lies on the floor or on top of something, never inside it
+    for (const b of [...L.batteries, ...(L.tracker ? [L.tracker] : [])]) {
+      assert.ok(w.heightAt(b.x, b.z) > b.y + 0.5, `battery at ${b.x},${b.z} is inside rock`);
+      for (const p of w.props) {
+        if (!p.solid || !p.on || p.k !== 0) continue;
+        const inside = b.x > p.x0 && b.x < p.x1 && b.z > p.z0 && b.z < p.z1 && b.y < p.y1 - 0.01 && b.y + 0.1 > p.y0;
+        assert.ok(!inside, `battery at ${b.x},${b.z} is buried in a prop`);
+      }
+      if (b.y > 0) assert.ok(w.props.some(p => p.solid && p.k === 0 && Math.abs(p.y1 - b.y) < 0.01
+        && b.x > p.x0 && b.x < p.x1 && b.z > p.z0 && b.z < p.z1), `battery at ${b.x},${b.z} floats at ${b.y} m`);
+    }
+    assert.equal(!!L.tracker, def.id === 'intake', 'only the first level hands you the tracker');
+    assert.ok(L.batteries.length >= (def.stalker ? 4 : 1), `${L.batteries.length} battery spots`);
     const pnav = new NavGrid(w, {radius: PLAYER_R, minH: 1.2});
     const f = pnav.field(L.start.x, L.start.z);
     for (const h of L.hides) assert.ok(reachableWithin(pnav, f, h.x, h.z, h.r - 0.1), `hiding spot ${h.x},${h.z} reachable`);

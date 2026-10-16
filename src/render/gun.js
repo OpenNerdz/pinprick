@@ -1,6 +1,7 @@
 // Draws the hand scanner over the scene. It uses the camera's own projection, so the emitter tip on
-// screen is exactly where the scanner's rays and beam lines start in the world. Depth is cleared
-// first, so it never sinks into walls.
+// screen is exactly where the scanner's rays and beam lines start in the world. The renderer clears
+// depth before the hand-held devices, so they never sink into walls (but can pass in front of each
+// other while you swap them).
 //
 // Lighting is deliberately sparse for a dark game: a dim key light, a cold rim so the silhouette
 // reads against black, the emitter's own glow on nearby metal when it fires, and emissive parts
@@ -8,7 +9,8 @@
 
 import {buildGunMesh, GUN_STRIDE} from './gunmesh.js';
 
-const VS = `
+/** Shared by the hand-held devices: a mesh in view space, lit in the fragment shader. */
+export const DEVICE_VS = `
 attribute vec3 aPos; attribute vec3 aNrm; attribute vec2 aUv; attribute float aMat;
 uniform mat4 uProj, uModel;
 varying vec3 vP, vN; varying vec2 vUv; varying float vMat;
@@ -73,7 +75,7 @@ export class GunRenderer {
       return s;
     };
     const p = gl.createProgram();
-    gl.attachShader(p, mk(gl.VERTEX_SHADER, VS)); gl.attachShader(p, mk(gl.FRAGMENT_SHADER, FS));
+    gl.attachShader(p, mk(gl.VERTEX_SHADER, DEVICE_VS)); gl.attachShader(p, mk(gl.FRAGMENT_SHADER, FS));
     ['aPos', 'aNrm', 'aUv', 'aMat'].forEach((a, i) => gl.bindAttribLocation(p, i, a));
     gl.linkProgram(p);
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
@@ -90,14 +92,13 @@ export class GunRenderer {
   /** s: {proj, model, lens: [x,y,z] in view space, charge, firing, heat, over, sweep (0..1 ready), time, flash} */
   draw(s) {
     const gl = this.gl, u = this.u;
-    gl.clear(gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.disable(gl.BLEND);
     gl.useProgram(this.p);
     gl.uniformMatrix4fv(u.uProj, false, s.proj); gl.uniformMatrix4fv(u.uModel, false, s.model);
     gl.uniform3f(u.uLens, s.lens[0], s.lens[1], s.lens[2]);
     gl.uniform1f(u.uCharge, s.charge); gl.uniform1f(u.uFiring, s.firing ? 1 : 0);
     gl.uniform1f(u.uHeat, s.heat); gl.uniform1f(u.uOver, s.over ? 1 : 0);
-    gl.uniform1f(u.uSweep, s.sweep); gl.uniform1f(u.uTime, s.time); gl.uniform1f(u.uFlash, s.flash);
+    gl.uniform1f(u.uSweep, s.sweep); gl.uniform1f(u.uTime, s.time % 600); gl.uniform1f(u.uFlash, s.flash); // wrapped: mediump time loses precision
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buf);
     for (let i = 0; i < 4; i++) gl.enableVertexAttribArray(i);
     const B = GUN_STRIDE * 4;

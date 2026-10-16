@@ -12,6 +12,8 @@ export class Hud {
       swp: $('swp'), staminaRow: $('stamina-row'), stamina: $('stamina').firstElementChild, hiddenRow: $('hidden-row'),
       fire: $('fire'), fireFill: $('firefill'), fireHeat: $('fireheat'), fireLab: $('firelab'),
       sweep: $('sweep'), sweepFill: $('sweepfill'), sweepLab: $('sweeplab'), crouch: $('crouch'),
+      trkRow: $('trk-row'), trk: $('trk'), trkFill: $('trk').firstElementChild, trkNote: $('trk-note'),
+      track: $('track'), trackFill: $('trackfill'), trackLab: $('tracklab'),
       reticle: $('reticle'), vignette: $('vignette'), blackout: $('blackout'),
     };
     this.sigEls = [...this.el.sig.children];
@@ -67,6 +69,24 @@ export class Hud {
     this.toggle('sweep', E.sweep, 'cool', cd > 0);
     this.set('sweepfill', E.sweepFill, 'strokeDashoffset', (182.2 * cd / SCANNER.sweepCooldown).toFixed(1));
 
+    // the motion tracker: nothing to show until you have one; its pad's ring is the battery
+    const tr = s.tracker, has = !!(tr && tr.owned);
+    this.set('trkrow', E.trkRow, 'hidden', !has);
+    this.set('trkpad', E.track, 'hidden', !has);
+    if (has) {
+      const b = Math.round(tr.battery * 40) / 40, low = b < 0.15, dead = b <= 0;
+      this.set('trk', E.trkFill, 'width', (b * 100).toFixed(0) + '%');
+      this.toggle('trk', E.trk, 'low', low);
+      this.set('trknote', E.trkNote, 'text', dead ? 'dead' : low ? 'low' : tr.on ? 'on' : '');
+      this.toggle('trknote', E.trkNote, 'on', tr.on && !low);
+      this.toggle('trknote', E.trkNote, 'low', low);
+      this.set('trackfill', E.trackFill, 'strokeDashoffset', (157.1 * (1 - b)).toFixed(1));
+      this.toggle('track', E.track, 'on', s.hands.want === 'tracker');
+      this.toggle('track', E.track, 'low', low && !dead);
+      this.toggle('track', E.track, 'dead', dead);
+      this.set('tracklab', E.trackLab, 'text', dead ? 'DEAD' : low ? 'LOW' : 'TRACK');
+    }
+
     // stamina and hiding
     this.set('starow', E.staminaRow, 'hidden', p.stamina >= 0.999);
     this.set('sta', E.stamina, 'width', (p.stamina * 100).toFixed(0) + '%');
@@ -85,6 +105,7 @@ export class Hud {
     this.set('ret', E.reticle, 'width', cone.toFixed(0) + 'px');
     this.set('reth', E.reticle, 'height', cone.toFixed(0) + 'px');
     this.toggle('ret', E.reticle, 'hot', sc.overheated);
+    this.set('reta', E.reticle, 'opacity', s.hands && s.hands.gun < 0.5 ? '0' : ''); // no aim ring with the scanner put away
 
 
     // red edges when it is close, and a flash of red when its sonar washes over you

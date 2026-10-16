@@ -3,6 +3,7 @@
 
 import {Renderer} from './render/renderer.js';
 import {buildGunMesh} from './render/gunmesh.js';
+import {buildTrackerMesh, TRACKER_SCREEN} from './render/trackermesh.js';
 import {Camera} from './render/camera.js';
 import {AudioEngine} from './audio/engine.js';
 import {Sounds} from './audio/sounds.js';
@@ -29,7 +30,7 @@ function boot(hotData) {
   const engine = new AudioEngine(), sounds = new Sounds(engine);
   const cam = new Camera(), hud = new Hud($);
   const view = {w: 0, h: 0};
-  const input = new Input(stage, canvas, {fire: $('fire'), sweep: $('sweep'), crouch: $('crouch'), stick: $('stick')}, settings);
+  const input = new Input(stage, canvas, {fire: $('fire'), sweep: $('sweep'), crouch: $('crouch'), track: $('track'), stick: $('stick')}, settings);
 
   let app = 'title';          // title | play | paused | settings | note | caught | won
   let settingsFrom = 'title';
@@ -39,7 +40,7 @@ function boot(hotData) {
   let lockHint = false;
 
   const sheets = ['title', 'paused', 'settings', 'note-sheet', 'caught', 'won'];
-  const playEls = ['hud', 'reticle', 'fire', 'sweep', 'crouch', 'pause'];
+  const playEls = ['hud', 'reticle', 'fire', 'sweep', 'crouch', 'track', 'pause']; // the HUD hides TRACK until you have one
   function show(sheet) {
     for (const id of sheets) $(id).hidden = id !== sheet;
     if (sheet) { clearTimeout(msgTimer); $('msg').classList.remove('on'); }
@@ -80,12 +81,14 @@ function boot(hotData) {
       ['Hold scan', 'paint the dark, drag to aim. It heats up'],
       ['Sweep', 'one full picture of the room. Loud'],
       ['Crouch', 'beside scan: quiet, fits the crawls, hides you in dark corners'],
+      ['Track', 'the motion tracker: what moves, through rock. Runs on batteries; ticks'],
     ] : input.noLock ? [
       ['W A S D', 'walk, Shift to sprint'],
       ['Drag', 'look around (arrow keys turn too)'],
       ['Hold Space', 'paint the dark. It heats up'],
       ['F or right click', 'one full picture of the room. Loud'],
       ['C', 'crouch: quiet, fits the crawls, hides you'],
+      ['Q', 'the motion tracker: what moves, through rock. Runs on batteries; ticks'],
       ['Esc or P', 'pause'],
     ] : [
       ['W A S D', 'walk, Shift to sprint'],
@@ -93,6 +96,7 @@ function boot(hotData) {
       ['Hold click', 'paint the dark (Space works too). It heats up'],
       ['F or right click', 'one full picture of the room. Loud'],
       ['C', 'crouch: quiet, fits the crawls, hides you'],
+      ['Q or middle click', 'the motion tracker: what moves, through rock. Runs on batteries; ticks'],
       ['Esc or P', 'pause'],
     ];
     const html = rows.map(([k, v]) => `<li style="display:contents"><b>${k}</b><span>${v}</span></li>`).join('');
@@ -186,7 +190,7 @@ function boot(hotData) {
     $('pause-goal').textContent = session.coresLeft > 0
       ? `${session.coresGot} of ${session.cores.length} cores recovered. ${formatTime(session.time)} in.`
       : `Every core is in. Get to the amber door. ${formatTime(session.time)} in.`;
-    for (const id of ['fire', 'sweep', 'crouch']) $(id).hidden = true;
+    for (const id of ['fire', 'sweep', 'crouch', 'track']) $(id).hidden = true;
     show('paused');
   }
 
@@ -336,7 +340,7 @@ function boot(hotData) {
         session.update(dt, clock, intent, cam, view);
         if (app === 'play') hud.update(session, cam, view, reduceMotion);
       }
-      renderer.draw(cam, clock, session.diff.dotLife, 0.4, session.gunState(clock));
+      renderer.draw(cam, clock, session.diff.dotLife, 0.4, session.gunState(clock), session.trackerState(clock));
     } else if (attract) {
       attract.attract(dt, T, cam, view, ATTRACT.pose);
       renderer.draw(cam, T, DOTS.life, 0.4);
@@ -353,7 +357,7 @@ function boot(hotData) {
   // test hook for tools/smoke.mjs, only with #debug in the address; #debug-nopoints also stops point
   // drawing from the first frame (headless Chromium on Android loses its GL context on any draw)
   if (location.hash.startsWith('#debug')) renderer.skipPoints = location.hash === '#debug-nopoints';
-  if (location.hash.startsWith('#debug')) window.__pinprick = {get app() { return app; }, get session() { return session; }, startLevel, cam, renderer, buildGunMesh, get clock() { return session ? clock : last; }};
+  if (location.hash.startsWith('#debug')) window.__pinprick = {get app() { return app; }, get session() { return session; }, startLevel, cam, renderer, buildGunMesh, buildTrackerMesh, TRACKER_SCREEN, get clock() { return session ? clock : last; }};
 
   const hot = window.claude?.hot;
   try {

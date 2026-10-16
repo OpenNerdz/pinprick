@@ -4,6 +4,7 @@
 
 import {DotBuffer, STRIDE} from './dots.js';
 import {GunRenderer} from './gun.js';
+import {TrackerRenderer} from './tracker.js';
 
 const OCC_VS = 'attribute vec3 aPos;uniform mat4 uVP;void main(){gl_Position=uVP*vec4(aPos,1.0);}';
 const OCC_FS = 'precision mediump float;void main(){gl_FragColor=vec4(0.0,0.0,0.0,1.0);}';
@@ -108,6 +109,7 @@ export class Renderer {
     this.dpr = 1; this.w = 0; this.h = 0;
     this.dynVerts = [];
     this.gun = new GunRenderer(gl);
+    this.tracker = new TrackerRenderer(gl);
     this.skipPoints = false;   // test hook: headless Chromium on Android cannot draw points
   }
 
@@ -222,7 +224,7 @@ export class Renderer {
     gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 32, 16); gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 32, 28);
   }
 
-  draw(cam, t, life, ghostGain, gun = null) {
+  draw(cam, t, life, ghostGain, gun = null, trk = null) {
     const gl = this.gl;
     this.uploadDots(t);
     gl.clearColor(0, 0, 0, 1); gl.depthMask(true);
@@ -281,6 +283,9 @@ export class Renderer {
     }
     this.fanLast = this.fanN; // kept for the smoke test's 2D redraw
     this.lineN = 0; this.fanN = 0;
+    // the hand-held devices: depth cleared once, so neither sinks into a wall but they overlap properly
+    if (gun || trk) { gl.depthMask(true); gl.clear(gl.DEPTH_BUFFER_BIT); } // clear obeys the mask the dots left off
     if (gun) { gun.proj = cam.proj; this.gun.draw(gun); }
+    if (trk) { trk.proj = cam.proj; this.tracker.draw(trk); }
   }
 }

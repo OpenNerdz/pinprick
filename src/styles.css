@@ -13,6 +13,7 @@
   --danger:#ff5240;
   --note:#8dffb4;
   --rust:#c2643c;
+  --trk:#cfff4a;
   --font-display:'Michroma','Eurostile','Arial Narrow',sans-serif;
   --font-ui:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
   --gl:max(16px, env(safe-area-inset-left, 0px));
@@ -54,6 +55,11 @@ button{font:inherit;color:inherit}
 #heat.warm i{background:var(--exit)}
 #heat.hot i{background:var(--danger)}
 #stamina i{background:var(--near)}
+#trk i{background:var(--trk)}
+#trk.low i{background:var(--exit)}
+#trk-note{font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+#trk-note.on{color:var(--trk)}
+#trk-note.low{color:var(--danger)}
 #swp{font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--near);font-variant-numeric:tabular-nums}
 #swp.cool{color:var(--dim)}
 .tag{font-size:.64rem;letter-spacing:.2em;text-transform:uppercase;color:var(--void);background:var(--note);padding:2px 7px}
@@ -78,6 +84,15 @@ button{font:inherit;color:inherit}
 .lefty .pad.big{right:auto;left:calc(var(--gl) + 4px)}
 .lefty .pad.mid{right:auto;left:calc(var(--gl) + 16px)}
 .lefty .pad.small{right:auto;left:calc(var(--gl) + 106px)}
+.pad.tiny{right:calc(var(--gr) + 100px);bottom:118px;width:56px;height:56px} /* the tracker: between CROUCH and SWEEP */
+.lefty .pad.tiny{right:auto;left:calc(var(--gl) + 100px)}
+.pad.tiny span{font-size:.46rem;letter-spacing:.1em;color:var(--trk)}
+#track .fill{fill:none;stroke:var(--trk);stroke-width:2.5;stroke-linecap:round;stroke-dasharray:157.1;stroke-dashoffset:0}
+#track.on .track{stroke:var(--trk)}
+#track.on span{color:var(--ink)}
+#track.low .fill{stroke:var(--exit)}
+#track.dead .fill{stroke:var(--dim)}
+#track.dead span{color:var(--danger)}
 .pad.big span{font-size:.68rem}
 .pad.mid span{font-size:.58rem;letter-spacing:.14em;color:var(--near);font-variant-numeric:tabular-nums}
 .pad.small span{font-size:.5rem;letter-spacing:.12em}
@@ -151,4 +166,5 @@ h2{font-family:var(--font-display);font-weight:400;font-size:1.2rem;letter-spaci
 .stats b{font-weight:400;font-size:1.3rem;color:var(--near)}
 .stats b.new{color:var(--exit)}
 @media (max-height:520px){.sheet{gap:9px;padding-block:14px 16px}.lede{font-size:.8rem}h1{font-size:2rem}.levels button{min-height:38px;padding:4px 10px}}
+@media (max-height:520px) and (orientation:landscape){#msg{left:calc(var(--gl) + 190px);top:16%}} /* short screens: clear of the HUD */
 @media (prefers-reduced-motion:reduce){#msg{transition:none}}

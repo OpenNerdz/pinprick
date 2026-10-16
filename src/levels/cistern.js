@@ -67,6 +67,8 @@ export default {
     {x: 12, y: 1.2, z: 24.8, face: 'e', w: 3.2, h: 0.8, text: 'QUIET IS SAFE'},
   ],
   hides: [{x: 14.4, z: 33.2, r: 0.9}, {x: 44.6, z: 33.2, r: 0.9}, {x: 9, z: 8.2, r: 0.9}],
+  // west-room crate, east-room switchgear, the fallen grate, south-east corner, pillared hall's far corner
+  batteries: {spots: [[3.5, 9.0, 1.0], [39.1, 7.1, 1.3], [22.3, 31.35, 0.9], [45.3, 37.3], [35.4, 14.6]]},
   ghosts: [[6, 8], [5, 14], [5, 21], [9, 21], [14, 21], [18, 23], [22, 26.6]],
   triggers: [
     {x: 13, z: 21, r: 2, actions: [['whisper', 34, 26]]},

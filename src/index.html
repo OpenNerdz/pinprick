@@ -15,6 +15,7 @@
     <div class="row"><span class="lab" id="sig-lab">Signal</span><span id="sig"><i></i><i></i><i></i><i></i><i></i></span><span id="sig-note"></span></div>
     <div class="row"><span class="lab">Heat</span><span class="meter" id="heat"><i></i></span></div>
     <div class="row"><span class="lab">Sweep</span><span id="swp">Ready</span></div>
+    <div class="row" id="trk-row" hidden><span class="lab">Tracker</span><span class="meter" id="trk"><i></i></span><span id="trk-note"></span></div>
     <div class="row" id="stamina-row" hidden><span class="lab">Breath</span><span class="meter" id="stamina"><i></i></span></div>
     <div class="row" id="hidden-row" hidden><span class="tag">Hidden</span></div>
   </div>
@@ -26,6 +27,10 @@
 
   <div id="stick" hidden><i></i></div>
   <div id="crouch" class="pad small" hidden aria-hidden="true"><span>CROUCH</span></div>
+  <div id="track" class="pad tiny" hidden aria-hidden="true">
+    <svg viewBox="0 0 56 56"><circle class="track" cx="28" cy="28" r="25"/><circle class="fill" id="trackfill" cx="28" cy="28" r="25"/></svg>
+    <span id="tracklab">TRACK</span>
+  </div>
   <div id="sweep" class="pad mid" hidden aria-hidden="true">
     <svg viewBox="0 0 64 64"><circle class="track" cx="32" cy="32" r="29"/><circle class="fill" id="sweepfill" cx="32" cy="32" r="29"/></svg>
     <span id="sweeplab">SWEEP</span>

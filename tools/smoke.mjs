@@ -2,8 +2,9 @@
 // console error. Usage: node tools/smoke.mjs [path-to-chromium]
 //
 // Headless Chromium on Android (SwiftShader) loses its WebGL context on the first draw call of any
-// kind, so the frame is redrawn on a 2D canvas laid over it: the dot cloud, and the gun's real triangles
-// projected through the game's own camera and view-model matrices, lit with the shader's formulas.
+// kind, so the frame is redrawn on a 2D canvas laid over it: the dot cloud, and the gun's and the motion
+// tracker's real triangles projected through the game's own camera and view-model matrices, lit with
+// the shaders' formulas (the tracker's screen reduced to its rings and blips).
 // Game logic, HUD and screens are the real thing; only the final pixels are substituted.
 import {chromium} from 'playwright-core';
 import {mkdirSync} from 'node:fs';
@@ -64,13 +65,55 @@ function overlay() {
       ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.lineTo(...c); ctx.closePath(); ctx.fill();
     }
     const gs = g.session && g.session.gunState(T);
-    if (gs) drawGun(gs, W, H);
+    if (gs) drawMesh(mesh, gs.model, W, H, (m, col) => gunShade(m, col, gs));
+    const ts = g.session && g.session.trackerState(T);
+    if (ts) drawTracker(ts, W, H);
   })();
 
-  // the gun: software-projected triangles, painter's order, the shader's lighting per face
+  const teal = [0.22, 0.83, 0.77], lime = [0.62, 1, 0.22];
+  function gunShade(m, col, s) {
+    const heat = [1, 0.42 - 0.34 * s.heat, 0.08], glow = s.charge * (s.firing ? 1 : 0);
+    if (m === 3) return teal.map(v => v * (0.35 + 1.6 * glow + 2 * s.flash));
+    if (m === 4) return col.map((v, k) => v * 0.6 + teal[k] * (0.06 + glow * 0.8 + s.flash));
+    if (m === 5) { const h0 = Math.max(0, Math.min(1, (s.heat - 0.5) / 0.5)), h = h0 * h0 * (3 - 2 * h0); return col.map((v, k) => v + heat[k] * h * 0.85); }
+    if (m === 6) return [0.03, 0.2 + 0.4 * s.charge, 0.2 + 0.35 * s.charge];
+    return col;
+  }
+
+  // the tracker: its body like the gun's, its screen dark phosphor with the rings and blips drawn on top
+  const tmesh = g.buildTrackerMesh(), S = g.TRACKER_SCREEN;
+  function drawTracker(s, W, H) {
+    const power = s.a[2];
+    drawMesh(tmesh, s.model, W, H, (m, col) => m === 3 ? col.map((v, k) => v + lime[k] * 0.06 * power)
+      : m === 4 ? lime.map(v => v * (0.12 + 1.6 * s.a[3]) * power) : m === 6 ? [0.006, 0.02 + 0.03 * power, 0.01] : col);
+    if (power <= 0 || s.c[2] > 0.5) return;
+    const M = s.model, P = g.cam.proj;
+    const at = (fx, fy) => { // fan space (1 = full reach) to the screen's pixels
+      const u = fx * 0.84 / 1.657 + 0.5, v = fy * 0.84 + 0.07;
+      const x = S.x0 + u * (S.x1 - S.x0), y = S.y0 + v * (S.y1 - S.y0), z = S.z + 0.0005;
+      const q = [M[0] * x + M[4] * y + M[8] * z + M[12], M[1] * x + M[5] * y + M[9] * z + M[13], M[2] * x + M[6] * y + M[10] * z + M[14]];
+      return [(P[0] * q[0] / -q[2] + 1) * W / 2, (1 - P[5] * q[1] / -q[2]) * H / 2];
+    };
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(158,255,56,0.35)'; ctx.lineWidth = 1;
+    for (const r of [1 / 3, 2 / 3, 1]) {
+      ctx.beginPath();
+      for (let i = 0; i <= 24; i++) { const a = -Math.PI / 2 + Math.PI * i / 24, q = at(Math.sin(a) * r * s.c[0], Math.cos(a) * r * s.c[0]); i ? ctx.lineTo(...q) : ctx.moveTo(...q); }
+      ctx.stroke();
+    }
+    for (let i = 0; i < 6; i++) {
+      const b = s.k[i * 4 + 2];
+      if (b <= 0) continue;
+      const q = at(s.k[i * 4], s.k[i * 4 + 1]);
+      ctx.fillStyle = `rgba(158,255,56,${b.toFixed(2)})`;
+      ctx.beginPath(); ctx.arc(q[0], q[1], 4, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // a device: software-projected triangles, painter's order, the shader's lighting per face
   const mesh = g.buildGunMesh(), tris = [];
-  function drawGun(s, W, H) {
-    const M = s.model, P = g.cam.proj, L = [-0.45, 0.85, 0.35], ll = Math.hypot(...L);
+  function drawMesh(mesh, M, W, H, shade) {
+    const P = g.cam.proj, L = [-0.45, 0.85, 0.35], ll = Math.hypot(...L);
     const tv = (i) => {
       const o = i * 9, x = mesh[o], y = mesh[o + 1], z = mesh[o + 2];
       return [M[0] * x + M[4] * y + M[8] * z + M[12], M[1] * x + M[5] * y + M[9] * z + M[13], M[2] * x + M[6] * y + M[10] * z + M[14]];
@@ -79,6 +122,7 @@ function overlay() {
     for (let t = 0; t < mesh.length / 27; t++) {
       const a = tv(t * 3), b = tv(t * 3 + 1), c = tv(t * 3 + 2), o = t * 27;
       let nx = M[0] * mesh[o + 3] + M[4] * mesh[o + 4] + M[8] * mesh[o + 5], ny = M[1] * mesh[o + 3] + M[5] * mesh[o + 4] + M[9] * mesh[o + 5], nz = M[2] * mesh[o + 3] + M[6] * mesh[o + 4] + M[10] * mesh[o + 5];
+      const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl; // the model matrix scales
       const cx = (a[0] + b[0] + c[0]) / 3, cy = (a[1] + b[1] + c[1]) / 3, cz = (a[2] + b[2] + c[2]) / 3;
       const vl = Math.hypot(cx, cy, cz), vx = -cx / vl, vy = -cy / vl, vz = -cz / vl;
       if (nx * vx + ny * vy + nz * vz < -0.05) continue; // back faces
@@ -87,13 +131,7 @@ function overlay() {
       const dif = Math.max(0, (nx * L[0] + ny * L[1] + nz * L[2]) / ll), rim = Math.pow(1 - Math.max(0, nx * vx + ny * vy + nz * vz), 3);
       const hx = L[0] / ll + vx, hy = L[1] / ll + vy, hz = L[2] / ll + vz, hl = Math.hypot(hx, hy, hz);
       const spec = Math.pow(Math.max(0, (nx * hx + ny * hy + nz * hz) / hl), 42) * 0.35 * 0.6;
-      let col = base.map((v, k) => v * (0.1 + 0.55 * dif) + spec + rim * [0.1, 0.22, 0.22][k]);
-      const teal = [0.22, 0.83, 0.77], heat = [1, 0.42 - 0.34 * s.heat, 0.08];
-      const glow = s.charge * (s.firing ? 1 : 0);
-      if (m === 3) col = teal.map(v => v * (0.35 + 1.6 * glow + 2 * s.flash));
-      else if (m === 4) col = col.map((v, k) => v * 0.6 + teal[k] * (0.06 + glow * 0.8 + s.flash));
-      else if (m === 5) { const h0 = Math.max(0, Math.min(1, (s.heat - 0.5) / 0.5)), h = h0 * h0 * (3 - 2 * h0); col = col.map((v, k) => v + heat[k] * h * 0.85); }
-      else if (m === 6) col = [0.03, 0.2 + 0.4 * s.charge, 0.2 + 0.35 * s.charge];
+      const col = shade(m, base.map((v, k) => v * (0.1 + 0.55 * dif) + spec + rim * [0.1, 0.22, 0.22][k]));
       const pr = q => { const w = -q[2]; return [(P[0] * q[0] / w + 1) * W / 2, (1 - P[5] * q[1] / w) * H / 2]; };
       tris.push({z: cz, pts: [pr(a), pr(b), pr(c)], col});
     }
@@ -187,9 +225,16 @@ const place = (p, x, z, yaw, pitch = 0) => p.evaluate(([x, z, yaw, pitch]) => {
   await sleep(2200);
   await p.click('#caught-quit'); await sleep(300);
 
-  // level 3: overheat, then let it find us
+  // level 3: the motion tracker on the creature crossing the start room; then overheat, then let it find us
   await p.click('#levels button[data-i="2"]');
   await p.click('#go'); await sleep(400);
+  await p.evaluate(() => { const s = window.__pinprick.session, st = s.stalker; st._hear = st.hear; st.hear = () => {}; st.x = 15; st.z = 31.5; st.enter('investigate', 0); st.target = {x: 3, z: 31.5}; });
+  await place(p, 8, 37, 0);
+  await p.keyboard.press('KeyQ'); await sleep(2200);
+  console.log('tracker', await p.evaluate(() => { const t = window.__pinprick.session.tracker; return {on: t.on, battery: +t.battery.toFixed(2), blips: t.blips.length}; }));
+  await shot(p, 'd11a-tracker');
+  await p.keyboard.press('KeyQ'); await sleep(400);
+  await p.evaluate(() => { const st = window.__pinprick.session.stalker; st.hear = st._hear; });
   await p.keyboard.down('Space');
   for (let i = 0; i < 14; i++) { await sleep(700); const s = await state(p); if (s.over) break; }
   console.log('overheat', await state(p));
@@ -239,6 +284,13 @@ const place = (p, x, z, yaw, pitch = 0) => p.evaluate(([x, z, yaw, pitch]) => {
   await touch('touchStart', [{x: cr.x + cr.width / 2, y: cr.y + cr.height / 2, id: 3}]); await touch('touchEnd', []);
   await sleep(300);
   console.log('after crouch tap', await state(p));
+  // pick up the tutorial's tracker and tap TRACK
+  await place(p, 11, 18.4, Math.PI); await sleep(300);
+  const tk = await p.locator('#track').boundingBox();
+  await touch('touchStart', [{x: tk.x + tk.width / 2, y: tk.y + tk.height / 2, id: 4}]); await touch('touchEnd', []);
+  await sleep(1500);
+  console.log('tracker tapped', await p.evaluate(() => { const s = window.__pinprick.session; return {owned: s.tracker.owned, on: s.tracker.on, up: s.hands.trk}; }));
+  await shot(p, 'm02b-tracker');
   await p.tap('#pause'); await sleep(300);
   await shot(p, 'm03-paused');
   await p.tap('#quit'); await sleep(300);

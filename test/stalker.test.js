@@ -201,19 +201,46 @@ test('its sonar paints red dots where it listens', () => {
   assert.ok(red.every(([x, , z]) => Math.hypot(x - 26, z - 3) < s.diff.sonar + 0.5), 'all within its reach');
 });
 
-test('the beam pins it: on Easy it cannot move at all, on Hard it still drags itself on', () => {
-  const moved = {};
+test('the beam stops it dead; hold it there and it breaks and runs, a little later each time', () => {
   for (const diff of ['easy', 'normal', 'hard']) {
-    const {s} = make(LEVELS[1], diff), st = s.stalker;
-    st.wake(); st.hear = noop; st.x = 17; st.z = 16.5; st.notice(17, 24.5, 0); st.enter('hunt', 0);
-    s.player.x = 17; s.player.z = 24.5; s.player.yaw = 0; s.player.pitch = 0.05;
-    let t = run(s, 0, 1, () => { const it = intent(); it.firing = true; return it; });
-    const z0 = st.z;
-    run(s, t, 3, () => { const it = intent(); it.firing = true; return it; });
-    moved[diff] = st.z - z0;
-    assert.ok(st.pinned, `${diff}: pinned`);
+    const {s} = make(LEVELS[1], diff), st = s.stalker, p = s.player, held = [];
+    // the scanner kept cool, so only the creature decides how long this takes
+    const fire = () => { const it = intent(); it.firing = true; s.scanner.heat = 0; return it; };
+    let t = 0;
+    for (let round = 0; round < 2; round++) {
+      st.wake(); st.hear = noop; st.x = 17; st.z = 16.5; st.notice(17, 24.5, t); st.enter('hunt', t);
+      p.x = 17; p.z = 24.5; p.yaw = 0; p.pitch = 0.05;
+      let pinnedAt = null, z0 = 0, crept = 0;
+      for (const end = t + 12; t < end && st.state !== 'flee' && s.state === 'play';) {
+        t = run(s, t, dt, fire);
+        if (st.pinned && pinnedAt === null) { pinnedAt = t; z0 = st.z; }
+        if (pinnedAt !== null) crept = Math.max(crept, st.z - z0);
+      }
+      assert.equal(s.state, 'play', `${diff} round ${round}: caught while holding the beam on it`);
+      assert.equal(st.state, 'flee', `${diff} round ${round}: still ${st.state} after 12 s of light`);
+      // (a step at most while the scanner spins up and the beam still flickers over it)
+      assert.ok(crept < 0.3, `${diff} round ${round}: crept ${crept.toFixed(2)} m in the light`);
+      held.push(t - pinnedAt);
+      // it runs away from you, never through you
+      const d0 = st.euclid;
+      t = run(s, t, 3);
+      assert.equal(s.state, 'play', `${diff} round ${round}: caught by it running off`);
+      assert.ok(st.euclid > d0 + 4, `${diff} round ${round}: ran from ${d0.toFixed(1)} m to ${st.euclid.toFixed(1)} m`);
+    }
+    if (diff === 'easy') assert.ok(Math.abs(held[1] - held[0]) < 0.2, `easy: ${held.map(h => h.toFixed(1))}`);
+    else assert.ok(held[1] > held[0] + 0.8, `${diff}: it should take longer the second time (${held.map(h => h.toFixed(1))} s)`);
   }
-  assert.ok(moved.easy < 0.2 && moved.normal < moved.hard && moved.hard < 3.5, JSON.stringify(moved));
+});
+
+test('after the last core the beam still stops it, but it no longer runs', () => {
+  const {s} = make(LEVELS[1]), st = s.stalker, p = s.player;
+  st.wake(); st.hear = noop; st.x = 17; st.z = 16.5; st.enter('finale', 0);
+  p.x = 17; p.z = 24.5; p.yaw = 0; p.pitch = 0.05;
+  let z0 = null;
+  run(s, 0, 8, () => { if (st.pinned && z0 === null) z0 = st.z; const it = intent(); it.firing = true; s.scanner.heat = 0; return it; });
+  assert.equal(s.state, 'play');
+  assert.equal(st.state, 'finale');
+  assert.ok(st.pinned && st.z - z0 < 0.3, `pinned ${st.pinned}, crept ${(st.z - z0).toFixed(2)} m`);
 });
 
 test('stalking: it follows your footsteps, your steps sound doubled, and if you never look back it pounces', () => {

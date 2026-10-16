@@ -6,7 +6,7 @@
 //   slam id / open id      close or open a door
 //   statue x z [face] [lift]  the statue moves the next time nobody is looking at it
 //   silence seconds        the ambience drops out
-//   steps x0 z0 x1 z1 [n]  footsteps walk past on the other side of a wall
+//   steps x0 z0 x1 z1 [n]  footsteps walk past on the other side of a wall (the tracker sees them too)
 //   whisper x z            something whispers from there
 //   clicks x z             its clicking, from there
 //   noise x z loud         a sound the creature will come to investigate
@@ -34,7 +34,7 @@ export class Scares {
       if (Math.hypot(p.x - t.x, p.z - t.z) > (t.r ?? 1.5)) continue;
       if (t.fired && T - t.firedAt < (t.every ?? 20)) continue;
       t.fired = true; t.firedAt = T;
-      for (const a of t.actions) this.pending.push({at: T + (t.delay ?? 0) + (a.at ?? 0), a});
+      for (const a of t.actions) this.pending.push({at: T + (t.delay ?? 0), a});
     }
     for (let i = this.pending.length - 1; i >= 0; i--) {
       if (this.pending[i].at > T) continue;
@@ -47,14 +47,18 @@ export class Scares {
     const f = this.figure;
     if (f.on) {
       if (f.hits > 0 && this.figureSeen < 0) { this.figureSeen = T; s.sounds.sting(); buzz([20, 30, 60]); }
-      if ((this.figureSeen >= 0 && T - this.figureSeen > 1.1) || T - this.figureT > 9) f.on = false;
+      if ((this.figureSeen >= 0 && T - this.figureSeen > 1.1) || T - this.figureT > 9) {
+        f.on = false;
+        s.tracker?.motion(f.x, f.z, T, 0.8); // going, it moves
+      }
     }
 
-    // the statue only moves while no ray has touched it for a while
+    // the statue only moves while no ray has touched it for a while (the tracker sees it go)
     const st = s.statue, m = this.statueMove;
     if (st && m && T - st.lastHit > 1.5 && Math.hypot(p.x - m.x, p.z - m.z) > 3) {
       st.place(m.x, m.z, m.face ?? st.face, m.lift ?? 0);
       this.statueMove = null;
+      s.tracker?.motion(m.x, m.z, T, 0.8);
     }
   }
 
@@ -75,7 +79,10 @@ export class Scares {
         }
         break;
       }
-      case 'step': s.sounds.creatureStep(args[0], args[1], 0.7, 1.2); break;
+      case 'step': // the tracker sees whatever is walking there, too
+        s.sounds.creatureStep(args[0], args[1], 0.7, 1.2);
+        s.tracker?.motion(args[0], args[1], T, 0.7);
+        break;
       case 'whisper': s.sounds.whisper(args[0], args[1]); break;
       case 'clicks': s.sounds.clicks(args[0], args[1], 0.4); break;
       case 'noise': s.noise(args[0], args[1], args[2] ?? NOISE.slam, true); break;
@@ -93,6 +100,7 @@ export class Scares {
       if (!s.playerNav.walkableAt(x, z)) continue;
       f.hits = 0; f.on = true; this.figureT = T; this.figureSeen = -1;
       f.place(x, z, p.yaw);
+      s.tracker?.motion(x, z, T, 1.2); // stepping in behind you
       return;
     }
   }

@@ -14,14 +14,16 @@ only a hiding spot is safe. Three things make it this game's monster:
 
 - **It has a scanner too.** When it listens it clicks, and a moment later the echo splashes red dots
   over everything around it. Whatever moves inside that red, it finds. Freeze on the first click.
-- **Light holds it.** Keep your beam on it (a glance is safe) and it knows where you are, but it can
-  only drag itself toward you, rearing up in the light. Let go, or overheat, and it surges.
+- **Light stops it.** Keep your beam on it (a glance is safe) and it knows where you are, but it cannot
+  come on: it rears up in the light, and if you hold it there it shrieks and runs to the far side of
+  the level. It gets used to the light, though, so each time it takes longer to break (on Hard soon
+  longer than the scanner lasts), and if you let go or overheat first, it surges.
 - **It walks in step with you.** Having lost you, it may follow your footsteps from a dozen metres back,
   stepping only when you step, so your steps sound doubled. Each step it closes in, and at arm's length
   it pounces. Stand still until it gives up the trail, or turn and touch it with the beam, and it bolts.
 
 Difficulty changes its wits as well as its ears: how fast it reacts, how far its sonar reaches and how
-long the clicks warn you, how hard the light holds it, how often and how fast it stalks, whether it
+long the clicks warn you, how long the light takes to break it, how often and how fast it stalks, whether it
 reads which way you ran, how long it searches, and whether it goes round to wait at the far end of a
 crawl. After you are caught it keeps away from where you come back for a while. `node
 tools/balance.mjs` plays scripted players against it on every level and difficulty and prints how often
@@ -29,6 +31,27 @@ each gets caught.
 
 The scanner in your hand is a real 3D model: every dot leaves its emitter, the coils light as it
 charges, the fins glow as it heats, and the screen on its back shows charge, heat and sweep.
+
+**The motion tracker** (Q or middle click; TRACK on touch) is the other hand's device, found in
+Intake. Once a second it ticks and a wave sweeps across its screen. Anything that moved within reach
+lights up as a blip, ahead of you and straight through rock. A return beep rises in pitch as the blip
+gets closer. Its limits are what make it worth reading carefully:
+- **Only motion.** A creature that listens, waits, lingers or is pinned in your beam is invisible to it.
+  Each blip is where something was when the wave passed.
+- **Behind you.** It only lights the edge of the screen, and on Hard it shows nothing at all.
+- **Close range.** Inside 4 m the screen floods with static.
+- **False contacts.** The scripted scares show up too: the footsteps, the figure, the statue.
+
+Using it costs you, too:
+- **Batteries.** It runs on them: every raise costs a little, and it drains while it is up. Spare
+  batteries are lime-green dots, and only some spots hold one.
+- **Your hands.** It takes your hands: while it is up you cannot scan. SCAN or SWEEP swaps back to the
+  scanner, and sprinting puts it away.
+- **The tick.** The creature hears it up close. On Normal and Hard the first tick may make it go silent
+  and still, so it vanishes from the screen, and then it comes to look where the tick came from. If you
+  keep ticking at it, it works out where you are, and it can copy the tick. Difficulty also sets the
+  tracker's reach, battery life, how many batteries there are, how much blips wobble and how long they
+  last.
 
 ## Build and run
 
@@ -73,6 +96,7 @@ src/
     scanner.js     trigger, heat and overheat, sweep, dot colours; rays leave the gun's emitter
     viewmodel.js   how the gun sits in your hands: sway, lag, recoil, sprint, wall pull-back
     stalker.js     the creature: hearing by path distance, patrol/investigate/hunt/search/finale
+    tracker.js     the motion tracker: battery, pulses, what moved, blips; hands.js swaps it with the scanner
     scares.js      scripted triggers: figure behind you, slams, moving statue, footsteps
     signal.js      the signal bars and ping; static when the creature is near
     figures.js     creature / figure / statue shapes
@@ -81,6 +105,8 @@ src/
   render/          WebGL: depth-only level mesh, live-range dot ring buffer, beams, the gun
     gunmesh.js     the scanner's geometry, built in code
     gun.js         its shader: key and rim light, emitter glow, glowing coils, fins and screen
+    trackermesh.js, tracker.js   the motion tracker's geometry, and its screen drawn in the shader
+    meshkit.js     box / cylinder / extrusion helpers both devices are built from
   audio/           Web Audio engine (buses, voice cap) and the synthesised sound vocabulary
   ui/              input (touch/mouse/keys -> intent), HUD, settings, haptics
   levels/          one file per level + index.js for the order
@@ -93,7 +119,8 @@ android/           WebView wrapper for the APK
 
 Copy a file in `src/levels/`, edit the ASCII map (`#` rock, `.` 3 m room, `:` 6 m hall, `,` 2.2 m
 duct or doorway, `;` 1.6 m crawl only a crouching player fits through; one character is 2 m), then add
-it to `src/levels/index.js`. `npm test` checks that every core, note, hiding spot and the exit can be
+it to `src/levels/index.js` (with `batteries: {spots: [[x, z], [x, z, onTopOfThisHigh], ...]}` for the
+tracker). `npm test` checks that every core, note, battery, hiding spot and the exit can be
 reached on foot (also with every slammable door shut), that the exit pad can actually be stood on,
 that wall writing sits on a real wall, and that the creature can walk its whole patrol route. A bot
 then plays the level through the real game code, and `test/stalker.test.js` checks the creature stays

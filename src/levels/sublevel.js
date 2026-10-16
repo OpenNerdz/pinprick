@@ -65,13 +65,15 @@ export default {
     {x: 13.4, z: 24.6, title: 'Operator log, day 3',
       text: 'It does not see. I am sure of that now. It came down the hall while I stood still with the scanner off, and it walked straight past me.\n\nIt was listening. When it listens it clicks, and a moment later the walls light up red around it, like it has a scanner of its own. Whatever moves in that red, it finds. Freeze on the first click.'},
     {x: 16.8, z: 7.2, title: 'Operator log, day 4',
-      text: 'Do not hold the trigger for long. The hum carries. The sweep is worse: it hears that from anywhere on the level.\n\nBut it hates the light. Hold the beam on it and it can barely move. It knows where you are, though, and the scanner always overheats in the end. Have somewhere to go.\n\nWhen the signal fills with static, it is close. Stop, crouch, wait.'},
+      text: 'Do not hold the trigger for long. The hum carries. The sweep is worse: it hears that from anywhere on the level.\n\nBut it hates the light. Hold the beam on it and it cannot move, and if you keep it there it screams and runs. It knows where you are, though, it takes longer to break every time, and the scanner always overheats in the end. Do not let the heat run out with it in front of you.\n\nWhen the signal fills with static, it is close. Stop, crouch, wait.\n\nThe tracker only sees what moves. When the dot stops it has not gone; it is listening. Up close it hears the tick.'},
   ],
   decals: [
     {x: 12, y: 2.1, z: 14.6, face: 'e', w: 3.2, h: 0.9, text: "DON'T RUN"},
     {x: 4, y: 1.6, z: 12, face: 's', w: 3.2, h: 1.0, text: "IT WON'T FIT\nIN THE CRAWL"},
   ],
   hides: [{x: 3.4, z: 16.6, r: 1.0}, {x: 35.3, z: 9.7, r: 0.8}, {x: 25.2, z: 23.6, r: 0.9}],
+  // store floor, pump-room crate, gallery bench, the hall's far corner
+  batteries: {spots: [[9.4, 17.0], [31.9, 6.4, 1.1], [10, 2.4, 0.45], [25.3, 12.6]]},
   ghosts: [[19, 33], [19, 27], [16.5, 25], [12, 19], [7, 19], [3.6, 13], [7, 10], [7, 6.8], [4.2, 3.4]],
   triggers: [
     {x: 19, z: 24, r: 3, actions: [['steps', 11, 14, 11, 24, 9]]},

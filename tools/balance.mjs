@@ -1,7 +1,7 @@
 // Creature balance by difficulty: plays scripted players through the real Session (no browser) and
 // prints how often each gets caught. Run after changing the creature or the numbers in config.js.
 //   node tools/balance.mjs            every scenario
-//   node tools/balance.mjs stalked    just one (still, lunge, escape, sonar, stalked, finale, wander)
+//   node tools/balance.mjs stalked    just one (still, lunge, escape, sonar, stalked, beam, finale, wander, tracker)
 import {LEVELS} from '../src/levels/index.js';
 import {Session} from '../src/game/session.js';
 import {Camera} from '../src/render/camera.js';
@@ -40,8 +40,9 @@ function openSpot(s, r) {
   }
 }
 
-/** Per level, how many of N seeded runs end caught. */
-function rate(N, fn) { return LV.map(def => { let c = 0; for (let k = 0; k < N; k++) if (fn(def, k)) c++; return `${def.id} ${pct(c, N)}`; }); }
+/** Per level, how many of N seeded runs end caught (RUNS=3 in the environment for three times as many). */
+const RUNS = Math.max(1, +process.env.RUNS || 1);
+function rate(N, fn) { N *= RUNS; return LV.map(def => { let c = 0; for (let k = 0; k < N; k++) if (fn(def, k)) c++; return `${def.id} ${pct(c, N)}`; }); }
 
 if (on('still')) for (const diff of DIFFS) row('standing still in the open, 90 s', diff, rate(12, (def, k) => {
   const s = make(def, 100 + k, diff);
@@ -130,6 +131,36 @@ if (on('stalked')) for (const plan of ['walk', 'look', 'wait']) for (const diff 
   return s.state !== 'play';
 }));
 
+// it comes at you across open floor from 10 m and you stand your ground, holding the beam on it
+const BEAM = [['cold scanner', 0, 0], ['cold scanner, second time', 0, 1], ['cold scanner, third time', 0, 2], ['scanner half hot', 0.5, 0]];
+if (on('beam')) for (const [label, heat, times] of BEAM) for (const diff of DIFFS) row(`hunted from 10 m, holding the beam, ${label}`, diff, LV.map(def => {
+  let caught = 0, ran = 0; const N = 8;
+  for (let k = 0; k < N; k++) {
+    const s = make(def, 2100 + k, diff), st = s.stalker, p = s.player, r = rng(k * 11 + 6);
+    let from = null;
+    while (!from) { // an open spot with a clear line to somewhere 9..11 m away
+      [p.x, p.z] = openSpot(s, r);
+      const f = s.nav.field(p.x, p.z), c = [];
+      for (let i = 0; i < s.nav.n; i++) if (s.nav.walk[i] && f[i] > 9 && f[i] < 11 && s.nav.lineClear(p.x, p.z, s.nav.cx(i), s.nav.cz(i))) c.push(i);
+      if (c.length) from = c[Math.floor(r() * c.length)];
+    }
+    st.wake(); st.x = s.nav.cx(from); st.z = s.nav.cz(from); st.notice(p.x, p.z, 0); st.enter('hunt', 0);
+    st.burnNeed += times * s.diff.burnLearn; s.scanner.heat = heat;
+    let fled = false;
+    play(s, 20, () => {
+      const it = intent();
+      if (st.state === 'flee') fled = true;
+      if (fled) return it;
+      it.lookX = angleDiff(p.yaw, Math.atan2(st.x - p.x, -(st.z - p.z)));
+      p.pitch = Math.atan2(0.9 - p.eye, Math.max(0.5, st.euclid));
+      it.firing = true; return it;
+    });
+    if (s.state !== 'play') caught++;
+    if (fled) ran++;
+  }
+  return `${def.id} ${pct(caught, N)} caught ${pct(ran, N)} ran`;
+}));
+
 if (on('finale')) for (const diff of DIFFS) row('final run to the door, stopping 2 s in every 6', diff, rate(8, (def, k) => {
   const s = make(def, 400 + k, diff), st = s.stalker, p = s.player, r = rng(k + 3);
   if (!st.active) st.wake(); else { const q = st.cfg.patrol[Math.floor(r() * st.cfg.patrol.length)]; st.x = q[0]; st.z = q[1]; }
@@ -140,6 +171,51 @@ if (on('finale')) for (const diff of DIFFS) row('final run to the door, stopping
   play(s, 240, t => { const it = intent(); if (s.coresLeft === 0 && (t % 6) < 4) { steer(s, it, s.exit.x, s.exit.z, memo); it.sprint = st.euclid < 7 && !p.crouched; } return it; });
   return s.state === 'caught';
 }));
+
+// the motion tracker, on the same rounds as 'wander' below. 'read' stops every 10 s and holds it up for
+// 3 s, and when something moves within 10 m it puts it away and freezes, crouched, for 6 s. 'evade' reads
+// it the same way but moves off away from the contact instead. 'spam' keeps it up the whole time and
+// freezes with it still ticking.
+const TRK = {read: 'sneaking, reading the tracker every 10 s, 120 s', evade: '..., and moving away from contacts',
+  spam: 'sneaking with the tracker always up, 120 s'};
+if (on('tracker') || on('wander')) for (const plan of ['read', 'evade', 'spam']) for (const diff of DIFFS) {
+  let left = 0, runs = 0;
+  const cells = rate(8, (def, k) => {
+    const s = make(def, 700 + k, diff), st = s.stalker, p = s.player, tr = s.tracker, r = rng(k * 13 + 5);
+    if (!st.active) st.wake(p);
+    const memo = {i: 0, sneak: true};
+    let goal = null, freeze = -1, toggled = -99;
+    const flip = (it, t) => { if (t - toggled > 0.3) { it.track = true; toggled = t; } };
+    play(s, 120, t => {
+      const it = intent(), up = s.hands.want === 'tracker';
+      if (t < freeze) {
+        if (plan !== 'spam' && up) flip(it, t);
+        if (plan === 'evade') { if (!steer(s, it, goal[0], goal[1], memo)) freeze = t; return it; }
+        if (!p.crouched) it.crouch = true;
+        return it;
+      }
+      const near = up && tr.blips.find(b => Math.hypot(b.x - p.x, b.z - p.z) < 10);
+      if (near) {
+        freeze = t + 6;
+        if (plan === 'evade') { // of a few open spots, the one furthest from the contact (by the creature's paths)
+          const f = s.nav.field(near.x, near.z); let bs = -1;
+          for (let n = 0; n < 10; n++) { const q = openSpot(s, r), d = s.nav.distAt(f, q[0], q[1]); if (isFinite(d) && d > bs) { bs = d; goal = q; } }
+          memo.path = null;
+        }
+        return it;
+      }
+      const want = plan === 'spam' || t % 10 < 3;
+      if (want !== up && tr.battery > 0) flip(it, t);
+      if (plan === 'read' && up) return it; // standing still, reading it
+      if (!goal || Math.hypot(p.x - goal[0], p.z - goal[1]) < 0.8) { goal = openSpot(s, r); memo.path = null; }
+      if (!steer(s, it, goal[0], goal[1], memo)) goal = null;
+      return it;
+    });
+    left += tr.battery; runs++;
+    return s.state !== 'play';
+  });
+  row(TRK[plan], diff, [...cells, `battery left ${Math.round(100 * left / runs)}%`]);
+}
 
 if (on('wander')) for (const diff of DIFFS) row('sneaking about ignoring every warning, 120 s', diff, rate(8, (def, k) => {
   const s = make(def, 700 + k, diff), st = s.stalker, p = s.player, r = rng(k * 13 + 5);

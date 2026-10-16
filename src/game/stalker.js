@@ -29,14 +29,18 @@
 //   stalk   Having lost you, it may follow your footsteps instead, a dozen metres back, stepping only
 //           when you step so its feet hide in yours: your steps sound doubled. Each step it closes in,
 //           and at arm's length it pounces. Stop, turn the beam on it, and it bolts into the dark.
+// And it learns your motion tracker. It hears the tick up close. On Normal and Hard the first tick
+// may make it go silent and still, which hides it from the tracker, and then it comes to look where
+// the tick came from; keep ticking at it and it works out where you are. It may copy the tick, too.
 
-import {NOISE, STALKER} from '../config.js';
+import {NOISE, STALKER, TRACKER} from '../config.js';
 import {clamp, angleDiff} from '../util/math.js';
 import {cast, hit} from '../world/raycast.js';
 import {makeCreature, animateCreature, headOf} from './figures.js';
 import {buzz} from '../ui/haptics.js';
 
 const MIMICS = ['trigger', 'ping', 'chime', 'steps'];
+const MIMICS_TRACKER = [...MIMICS, 'tracker'];
 
 export class Stalker {
   /** `pnav` is the player's walkability grid (same cells as `nav`), used to find the ends of crawls. */
@@ -65,9 +69,12 @@ export class Stalker {
     this.rear = 0;
     this.dots = null;                     // the session's dot buffer, for the red sonar dots
     this.sonarT = this.span(STALKER.sonarWalking); this.pulseIn = -1;
-    this.lastLit = -99; this.pinned = false; this.pinScream = -99; this.surgeT = 0;
+    this.lastLit = -99; this.pinned = false; this.pinScream = -99; this.surgeT = 0; this.pinFor = 0;
+    this.burnT = 0; this.burnNeed = diff.burn; // it gets used to the light, so this grows each time it runs
     this.followD = STALKER.followFar; this.stalkAfter = 0; this.echoT = -1; this.echoes = 0; this.tense = 0;
     this.graceFor = 0; this.avoid = null;  // after a respawn: keep away from where you came back
+    this.pings = 0; this.pingAt = -99; this.pingX = 0; this.pingZ = 0; // your tracker's ticks it has heard
+    this.heardPing = false; this.afterPing = false;
     this.echoRays = 0;                    // red sonar rays still to paint
     this.events = [];                     // for the session: 'windup', 'sonar', 'found', 'pinned', 'echo', 'flee'
   }
@@ -91,7 +98,7 @@ export class Stalker {
     this.state = state;
     this.target = null; this.path = null; this.repathT = 0; this.sinceFix = 99; this.light = 0; this.exposure = 0; this.rear = 0;
     this.stuck = 0; this.lungeT = 0; this.stumbleT = 0; this.timer = 0;
-    this.pulseIn = -1; this.pinned = false; this.surgeT = 0; this.echoT = -1; this.followD = STALKER.followFar;
+    this.pulseIn = -1; this.pinned = false; this.surgeT = 0; this.pinFor = 0; this.burnT = 0; this.echoT = -1; this.followD = STALKER.followFar;
     this.prevHits = this.actor.hits;
     this.nav.field(this.x, this.z, this.field);
     this.playerDist = awayFrom ? this.nav.distAt(this.field, awayFrom.x, awayFrom.z, 2.5) : Infinity;
@@ -109,6 +116,22 @@ export class Stalker {
       if (isFinite(d) && d > bd) { bd = d; best = p; }
     }
     return best;
+  }
+
+  /**
+   * Where it runs from you: the patrol point farthest from you among those it reaches well before you
+   * could, so the way there never leads past you. Cornered, it takes the one most on its side.
+   */
+  fleeSpot(x, z) {
+    const fp = this.nav.field(x, z, this.tmpField), fc = this.nav.field(this.x, this.z, this.tmpField2);
+    let best = null, bd = -1, side = this.cfg.spawn, bs = -Infinity;
+    for (const q of [this.cfg.spawn, ...this.cfg.patrol]) {
+      const dp = this.nav.distAt(fp, q[0], q[1]), dc = this.nav.distAt(fc, q[0], q[1]);
+      if (!isFinite(dp) || !isFinite(dc)) continue;
+      if (dp - dc > 4 && dp > bd) { bd = dp; best = q; }
+      if (dp - dc > bs) { bs = dp - dc; side = q; }
+    }
+    return best || side;
   }
 
   /** The patrol point farthest from both the player and the exit (the shorter of the two walks). */
@@ -144,13 +167,15 @@ export class Stalker {
     if (state === 'finale') { this.timer = 0; this.sounds.shriek(this.x, this.z, this.muffle()); }
     if (state === 'stalk') { this.followD = Math.max(STALKER.followFar, Math.min(this.playerDist, 16)); this.echoes = 0; this.tense = 0; }
     if (state === 'flee') {
-      // lit up while it was following you: it shrieks and bolts for the far side of the level
-      const p = this.player || this.lastKnown, [x, z] = this.farthestPatrol(p.x, p.z);
+      // lit up while it was following you, or held in the light too long: it shrieks and bolts for the
+      // far side of the level, away from you
+      const p = this.player || this.lastKnown, [x, z] = this.fleeSpot(p.x, p.z);
       this.target = {x, z};
       this.stalkAfter = T + STALKER.stalkCooldown;
       this.sounds.shriek(this.x, this.z, Math.max(0.25, this.muffle()), 0.1);
       this.events.push('flee');
     }
+    if (state !== 'wait' && state !== 'listen') this.afterPing = false; // anything else, and it has moved on
     // a click burst in progress is cut off by anything but more listening
     if (!(state === 'patrol' || state === 'investigate' || state === 'listen' || state === 'search' || state === 'linger')) this.pulseIn = -1;
     this.state = state;
@@ -250,6 +275,8 @@ export class Stalker {
         if (n.exact || d < loud * 0.6) this.fix(n.x, n.z, T);
       } else if (n.exact || d < loud * 0.35 || this.state === 'linger' || this.state === 'search') {
         this.notice(n.x, n.z, T);
+      } else if (n.kind === 'tracker' && this.calm) {
+        this.hearPing(n, d, T);
       } else if (this.calm && n.kind === 'step' && d > loud * 0.5 && this.rand() < 0.5 && this.wantsStalk(T)) {
         // a distant footstep: rather than come and look, it starts to follow
         this.fix(n.x, n.z, T);
@@ -260,6 +287,37 @@ export class Stalker {
         this.enter('investigate', T);
       }
     }
+  }
+
+  /**
+   * Your tracker's tick, heard while it is calm. The first in a while may make it go silent and still
+   * (it has learned your tracker sees what moves) or stop to listen; either way it then comes to look
+   * where the tick came from. Otherwise it comes straight away. Keep ticking and it works out where you are.
+   */
+  hearPing(n, d, T) {
+    if (T - this.pingAt > TRACKER.pingWindow) this.pings = 0;
+    this.pings++; this.pingAt = T; this.pingX = n.x; this.pingZ = n.z;
+    if (!this.heardPing) { this.heardPing = true; this.events.push('ping'); }
+    if (this.diff.trkNotice && this.pings >= this.diff.trkNotice) { this.notice(n.x, n.z, T); return; }
+    if (this.pings === 1) {
+      const r = this.rand();
+      if (r < this.diff.trkFreeze) { this.enter('wait', T); this.timer = 4 + this.rand() * 3; this.afterPing = true; return; }
+      if (r < this.diff.trkFreeze + this.diff.trkListen) {
+        this.enter('listen', T); this.face = Math.atan2(n.x - this.x, -(n.z - this.z)); this.afterPing = true; return;
+      }
+    }
+    if (this.afterPing && (this.state === 'wait' || this.state === 'listen')) return; // still holding still for it
+    const j = d * 0.08;
+    this.target = {x: n.x + (this.rand() * 2 - 1) * j, z: n.z + (this.rand() * 2 - 1) * j};
+    this.enter('investigate', T);
+  }
+
+  /** Done standing still: if it was your tick it stopped for, it comes to look where that came from. */
+  resume(T) {
+    if (this.afterPing && T - this.pingAt < 20) {
+      this.target = {x: this.pingX + (this.rand() * 2 - 1) * 1.5, z: this.pingZ + (this.rand() * 2 - 1) * 1.5};
+      this.enter('investigate', T);
+    } else this.enter('patrol', T);
   }
 
   /** Advance one frame. Returns true when it has caught the player. */
@@ -283,17 +341,26 @@ export class Stalker {
     // it is the time the beam stays on it that counts, not how dense the beam is: a glance is safe
     this.exposure = fresh > 0 ? this.exposure + dt : Math.max(0, this.exposure - dt * 0.35);
     if (fresh > 0) this.lastLit = T;
-    // the beam pins it where it stands; when the light goes it surges
-    const wasPinned = this.pinned;
+    // the beam stops it where it stands; when the light goes it surges
+    const wasPinned = this.pinned, heldFor = this.pinFor;
     this.pinned = this.exposure > STALKER.pinAfter && T - this.lastLit < STALKER.pinLinger && this.state !== 'flee';
+    this.pinFor = this.pinned ? this.pinFor + dt : 0;
     if (this.pinned && !wasPinned && T - this.pinScream > 4) {
       this.pinScream = T;
       this.sounds.shriek(this.x, this.z, this.muffle(), 0.07);
       this.events.push('pinned');
     }
-    if (wasPinned && !this.pinned && (this.hunting || this.state === 'search' || this.state === 'alert')) this.surgeT = STALKER.surge;
+    if (wasPinned && !this.pinned && heldFor > STALKER.surgeAfter
+        && (this.hunting || this.state === 'search' || this.state === 'alert')) this.surgeT = STALKER.surge;
+    // once it knows you are there, hold it in the light long enough and it breaks and runs; each time it
+    // takes longer to break. After the last core it does not run: the light only holds it.
+    this.burnT = this.pinned && !this.calm && this.state !== 'finale' ? this.burnT + dt : Math.max(0, this.burnT - dt * 0.5);
+    if (this.burnT > this.burnNeed) {
+      this.burnT = 0; this.burnNeed += this.diff.burnLearn; this.pinned = false; this.pinFor = 0; this.exposure = 0;
+      this.enter('flee', T);
+    }
     // following you, it wants not to be seen: the first touch of the beam and it is gone
-    if (this.state === 'stalk' && fresh > 0) this.enter('flee', T);
+    else if (this.state === 'stalk' && fresh > 0) this.enter('flee', T);
     else if (this.exposure > this.diff.lightHold && this.playerDist < 16 && this.state !== 'finale' && this.state !== 'flee') this.notice(player.x, player.z, T);
     if (this.graceFor > 0) this.graceFor -= dt;
 
@@ -320,7 +387,7 @@ export class Stalker {
 
     const reach = A.crawl > 0.5 ? STALKER.catchCrawl : STALKER.catchDist;
     if (this.recoilT > 0) this.recoilT -= dt;
-    else if (this.euclid < reach && (!player.hidden || this.state === 'finale')) {
+    else if (this.euclid < reach && this.state !== 'flee' && (!player.hidden || this.state === 'finale')) {
       // on Easy, blundering into it before it knows you are there gives you one chance to run
       if (!(this.diff.bumpGrace && this.calm && T > this.graceAfter)) return true;
       this.graceAfter = T + 20; this.recoilT = this.diff.alertTime + 0.3;
@@ -343,12 +410,12 @@ export class Stalker {
       case 'listen': {
         listening = true;
         this.face += Math.sin(T * 0.9) * dt * 0.8;
-        if ((this.timer -= dt) <= 0 && this.pulseIn < 0) this.enter('patrol', T);
+        if ((this.timer -= dt) <= 0 && this.pulseIn < 0) this.resume(T);
         break;
       }
       case 'wait': { // standing in the dark, silent, not even breathing much
         breath = 0.1;
-        if ((this.timer -= dt) <= 0) this.enter('patrol', T);
+        if ((this.timer -= dt) <= 0) this.resume(T);
         break;
       }
       case 'investigate': {
@@ -441,7 +508,9 @@ export class Stalker {
     if (this.heardYou && !this.hunting && this.calm && this.state !== 'wait' && this.playerDist < 30) {
       if ((this.mimicT -= dt) <= 0) {
         this.mimicT = this.span(STALKER.mimicEvery);
-        this.sounds.mimic(MIMICS[Math.floor(this.rand() * MIMICS.length)], this.x, this.z, this.muffle());
+        // once it has heard your tracker it can copy that too, if it is clever enough (Normal and Hard)
+        const pool = this.heardPing && this.diff.trkFreeze > 0 ? MIMICS_TRACKER : MIMICS;
+        this.sounds.mimic(pool[Math.floor(this.rand() * pool.length)], this.x, this.z, this.muffle());
       }
     }
     if ((this.state === 'patrol' || this.state === 'investigate') && (this.groanT -= dt) <= 0) {
@@ -451,12 +520,10 @@ export class Stalker {
 
     speed *= this.diff.speed;
     if (this.pinned && this.state !== 'flee') {
-      // in the beam it can only drag itself toward you, shuddering
-      speed = this.hunting || this.state === 'search' ? Math.min(speed, this.diff.litCreep) : 0;
-      listening = true; this.lungeT = 0;
-    } else if (this.surgeT > 0) { this.surgeT -= dt; speed *= 1.35; }
+      // in the beam it cannot come on: it rears up and shudders where it stands
+      speed = 0; listening = true; this.lungeT = 0;
+    } else if (this.surgeT > 0) { this.surgeT -= dt; speed *= 1.35; this.lungeT = 0; } // a surge, but no lunge on top
     // the last few metres come at you in one lunge; if it misses, it stumbles and you can get away
-    if (this.pinned) { /* no lunge in the light */ }
     else if (this.stumbleT > 0) { this.stumbleT -= dt; speed *= 0.5; }
     else if (this.hunting && this.euclid < STALKER.lungeDist && nav.lineClear(this.x, this.z, player.x, player.z)) {
       speed *= STALKER.lunge;

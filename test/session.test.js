@@ -102,6 +102,15 @@ test('a hidden player is not found even when it walks right past', () => {
   assert.notEqual(st.state, 'hunt', 'never started hunting');
 });
 
+test("a trigger's delay holds its actions back", () => {
+  const {s, log} = makeSession(LEVELS[0]);
+  const cam = new Camera(), dt = 1 / 30, p = s.player;
+  s.L.triggers.push({x: p.x, z: p.z, r: 2, delay: 1, actions: [['say', 'late']]});
+  let t = 0, at = -1;
+  for (; t < 3 && at < 0; t += dt) { s.update(dt, t, intent(), cam, view); if (log.says.includes('late')) at = t; }
+  assert.ok(at > 0.95 && at < 1.2, `said after ${at.toFixed(2)} s`);
+});
+
 test('overheating cuts the scanner out until it cools', () => {
   const {s} = makeSession(LEVELS[0]);
   const cam = new Camera(), dt = 1 / 30;
@@ -118,22 +127,24 @@ test('overheating cuts the scanner out until it cools', () => {
   assert.equal(s.scanner.overheated, false, 'recovers after cooling');
 });
 
-test('holding the scanner on it pins it; let go and it charges on all fours', () => {
+test('the beam stops it dead; let go too soon and it charges on all fours', () => {
   const {s} = makeSession(LEVELS[1]);
   const st = s.stalker, cam = new Camera(), dt = 1 / 30;
   st.wake(); st.hear = () => {};           // deaf, so only the light can give you away
   st.x = 17; st.z = 16.5; st.enter('wait', 0); st.timer = 99;
   s.player.x = 17; s.player.z = 24.5; s.player.yaw = 0; s.player.pitch = 0.05;
   const seen = [], z0 = st.z;
-  let t = 0;
-  for (; t < 6 && s.state === 'play'; t += dt) {
+  let t = 0, huntAt = null;
+  // light it until it has known where you are for a moment, but not long enough to break it
+  for (; t < 6 && s.state === 'play' && (huntAt === null || t - huntAt < 0.4); t += dt) {
     const it = intent(); it.firing = true;
     s.update(dt, t, it, cam, view);
     if (seen[seen.length - 1] !== st.state) seen.push(st.state);
+    if (st.state === 'hunt' && huntAt === null) huntAt = t;
   }
   assert.deepEqual(seen.slice(0, 3), ['wait', 'alert', 'hunt'], `went ${seen.join(' > ')}`);
   assert.ok(st.pinned, 'held in the beam');
-  assert.ok(st.z - z0 < 3, `in the light it only drags itself forward (${(st.z - z0).toFixed(1)} m in 6 s)`);
+  assert.ok(st.z - z0 < 0.05, `in the light it cannot come on (${(st.z - z0).toFixed(2)} m)`);
   for (const end = t + 1.5; t < end && s.state === 'play'; t += dt) s.update(dt, t, intent(), cam, view);
   assert.ok(!st.pinned && (st.actor.crawl > 0.5 || s.state === 'caught'), 'let go, and it comes on all fours');
 });

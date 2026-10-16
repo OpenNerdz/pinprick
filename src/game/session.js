@@ -2,7 +2,7 @@
 // scripted scares, and advances them together each frame. The UI talks to it through `ui` hooks
 // and reads its public fields for the HUD.
 
-import {CELL, DIFFICULTY, DOTS, NOISE, PLAYER_R, SCANNER, STALKER} from '../config.js';
+import {CELL, DIFFICULTY, DOTS, NOISE, PLAYER_R, SCANNER, STALKER, TRACKER} from '../config.js';
 import {rng, angleDiff, clamp} from '../util/math.js';
 import {compileLevel, CORE_PICKUP, EXIT_RADIUS, NOTE_PICKUP} from '../world/level.js';
 import {NavGrid} from '../world/nav.js';
@@ -12,6 +12,8 @@ import {Scanner} from './scanner.js';
 import {Stalker} from './stalker.js';
 import {Scares} from './scares.js';
 import {Signal} from './signal.js';
+import {Tracker} from './tracker.js';
+import {Hands} from './hands.js';
 import {ViewModel} from './viewmodel.js';
 import {makeStatue, headOf} from './figures.js';
 import {buildDecals} from './decals.js';
@@ -34,14 +36,18 @@ export class Session {
     this.seed = opts.seed ?? (Math.random() * 1e9) >>> 0;
     this.rand = rng(this.seed);
 
-    this.L = compileLevel(def, this.seed);
+    const spots = def.batteries?.spots?.length || 0;
+    this.L = compileLevel(def, this.seed, {batteries: spots && Math.max(1, Math.floor(spots * this.diff.trkCells))});
     this.world = this.L.world;
-    this.cores = this.L.cores; this.exit = this.L.exit; this.notes = this.L.notes;
+    this.cores = this.L.cores; this.exit = this.L.exit; this.notes = this.L.notes; this.batteries = this.L.batteries;
     this.nav = new NavGrid(this.world, {radius: 0.35, minH: 2.15});
     this.playerNav = new NavGrid(this.world, {radius: PLAYER_R, minH: 1.2});
 
     this.player = new Player(this.L.start);
     this.scanner = new Scanner();
+    this.hands = new Hands();
+    // the motion tracker: already yours, unless this level has it lying somewhere to find
+    this.tracker = this.demo ? null : new Tracker(this.diff, this.seed, !this.L.tracker, this.L.tracker ? 0 : this.diff.trkStart);
     this.viewmodel = new ViewModel();
     this.lefty = !!opts.lefty;
     this.signal = new Signal();
@@ -66,7 +72,8 @@ export class Session {
     this.noiseFn = (x, z, loud, exact, kind) => this.noise(x, z, loud, exact, kind);
     this.coresGot = 0;
     this.meshVersion = -1;
-    this.checkpoint = {x: this.L.start.x, z: this.L.start.z, yaw: this.L.start.yaw};
+    this.fullSaid = -99;
+    this.markCheckpoint(this.L.start.x, this.L.start.z, this.L.start.yaw);
 
     const r = this.renderer;
     if (r) {
@@ -79,6 +86,24 @@ export class Session {
   }
 
   get coresLeft() { return this.cores.length - this.coresGot; }
+
+  /** Where you come back after being caught, and what the tracker had then (charge, batteries taken). */
+  markCheckpoint(x, z, yaw) {
+    const tr = this.tracker;
+    this.checkpoint = {x, z, yaw, battery: tr ? tr.battery : 0, owned: tr ? tr.owned : false,
+      taken: this.batteries.map(b => b.taken), trackerTaken: !!this.L.tracker?.taken};
+  }
+
+  /** Put the tracker, its charge and the batteries back as a checkpoint or snapshot had them. */
+  restoreTracker(c) {
+    const tr = this.tracker;
+    if (!tr || c.battery == null) return;
+    tr.owned = !!c.owned; tr.reset(c.battery);
+    this.batteries.forEach((b, i) => { b.taken = !!c.taken?.[i]; b.prop.on = !b.taken; });
+    const lt = this.L.tracker;
+    if (lt) { lt.taken = !!c.trackerTaken; for (const q of lt.parts) q.on = !lt.taken; }
+    this.world.touch();
+  }
 
   /** A sound the creature may hear. `kind` is 'step' for footsteps (it can follow those), else anything. */
   noise(x, z, loud, exact, kind = 'other') { this.noises.push({x, z, loud, exact, kind}); }
@@ -128,20 +153,28 @@ export class Session {
     const msg = p.update(dt, intent, this.world, this.noiseFn, this.sounds, this.reduceMotion);
     if (msg) this.ui.say(msg, 2200);
     cam.set(p.x, p.eye, p.z, p.yaw, p.pitch);
+    const hand = this.hands.update(dt, T, intent, this); // which device is up decides what the scanner may do
     this.viewmodel.update(dt, T, this, intent, cam, this.lefty, this.reduceMotion);
     this.sounds.e.listener.x = p.x; this.sounds.e.listener.z = p.z; this.sounds.e.listener.yaw = p.yaw;
 
     const wasOver = this.scanner.overheated;
-    this.scanner.update(dt, T, intent.firing, intent.sweep, this.scanCtx(cam, view));
+    this.scanner.update(dt, T, hand.fire, hand.sweep, this.scanCtx(cam, view));
     if (this.scanner.overheated && !wasOver) this.ui.say('The scanner is too hot. Let go and let it cool.', 3000);
 
-    // hiding: crouched, quiet and inside a hiding spot. Quiet anywhere: not moving and not scanning,
-    // which the creature cannot hear, so it will not walk into you (but a hunt still finds you).
+    // hiding: crouched, quiet and inside a hiding spot, with nothing ticking or humming in your hands.
+    // Quiet anywhere: not moving and not scanning, which the creature cannot hear, so it will not walk
+    // into you (but a hunt still finds you).
+    const tr = this.tracker;
     p.quiet = p.still > 0.3 && !this.scanner.active;
-    p.hidden = p.crouched && !this.scanner.active && this.L.hides.some(h => Math.hypot(p.x - h.x, p.z - h.z) < h.r);
+    p.hidden = p.crouched && !this.scanner.active && !(tr && tr.on) && this.L.hides.some(h => Math.hypot(p.x - h.x, p.z - h.z) < h.r);
 
     this.pickups(T);
     this.scares.update(dt, T);
+    if (tr) { // before the creature listens, so it hears this frame's tick
+      tr.update(dt, T, this, this.hands.trackerUp);
+      for (const e of tr.events) this.trackerEvent(e);
+      tr.events.length = 0;
+    }
 
     if (this.stalker) {
       const st = this.stalker, w = st.cfg.wake;
@@ -182,9 +215,18 @@ export class Session {
       this.fx.ping = 1; this.fearBoost = Math.max(this.fearBoost, 0.6);
       this.hint('sonar', 'Red on the walls: it is listening. Do not move until it stops.');
     } else if (e === 'found') this.sounds.sting();
-    else if (e === 'pinned') this.hint('pinned', 'The light holds it back. Not for long.');
+    else if (e === 'pinned') this.hint('pinned', 'The light stops it. Hold it there.');
     else if (e === 'echo') this.hint('echo', 'Your footsteps sound doubled.');
-    else if (e === 'flee') this.hint('flee', 'It ran from the light.');
+    else if (e === 'flee') this.hint('flee', 'It ran from the light. It will be back.');
+    else if (e === 'ping') this.hint('ping', 'It heard the tracker. Up close, it can.');
+  }
+
+  /** The tracker's own news. Battery news is said on every difficulty; it is not a hint, you need it. */
+  trackerEvent(e) {
+    if (e === 'contact') this.hint('contact', 'The tracker only shows what moves. When a dot stops, it has not gone.');
+    else if (e === 'low') this.ui.say('Tracker battery low.', 2400);
+    else if (e === 'dead') this.ui.say('The tracker is dead. Find a battery: lime-green dots.', 3600);
+    else if (e === 'close') this.fearBoost = Math.max(this.fearBoost, 0.5);
   }
 
   hint(key, text) {
@@ -195,8 +237,15 @@ export class Session {
 
   /** The gun to draw this frame, or null when it should not be on screen. */
   gunState(T) {
-    if (this.demo || this.state === 'won') return null;
+    if (this.demo || this.state === 'won' || this.hands.gun < 0.01) return null;
     return this.viewmodel.drawState(this.scanner, SCANNER.sweepCooldown, T);
+  }
+
+  /** The tracker to draw this frame, or null when it is not in your hand. */
+  trackerState(T) {
+    const tr = this.tracker, h = this.hands;
+    if (!tr || !tr.owned || this.state === 'won' || (h.trk < 0.01 && h.peek < 0.01)) return null;
+    return this.viewmodel.trackerDraw(tr, h, T, this.player);
   }
 
   pickups(T) {
@@ -207,7 +256,7 @@ export class Session {
       this.world.touch();
       this.sounds.core(); buzz(30);
       this.noise(c.x, c.z, NOISE.core, false);
-      this.checkpoint = {x: p.x, z: p.z, yaw: p.yaw};
+      this.markCheckpoint(p.x, p.z, p.yaw);
       this.ui.cores(this.coresGot, this.cores.length);
       if (this.coresLeft === 0) this.allCores(T);
       else this.ui.say(`Core ${this.coresGot} of ${this.cores.length} recovered.`, 3500);
@@ -217,6 +266,28 @@ export class Session {
       n.read = true;
       this.sounds.note();
       this.ui.note(n);
+    }
+    const tr = this.tracker, lt = this.L.tracker;
+    if (!tr) return;
+    if (lt && !lt.taken && Math.hypot(p.x - lt.x, p.z - lt.z) < TRACKER.pickupR + 0.4) {
+      lt.taken = true; for (const q of lt.parts) q.on = false;
+      this.world.touch();
+      tr.owned = true; tr.battery = lt.battery ?? this.diff.trkStart;
+      this.sounds.battery(); buzz(30);
+      this.ui.say({touch: 'A motion tracker. Tap TRACK to raise it: it shows what moves, not what stands still. Lime-green dots are its batteries.',
+        mouse: 'A motion tracker. Press Q to raise it: it shows what moves, not what stands still. Lime-green dots are its batteries.'}, 7000);
+    }
+    for (const b of this.batteries) {
+      if (b.taken || !tr.owned || Math.hypot(p.x - b.x, p.z - b.z) >= TRACKER.pickupR) continue;
+      if (tr.battery >= TRACKER.full) { // leave it for later
+        if (T - this.fullSaid > 8) { this.fullSaid = T; this.ui.say('The tracker is full. Leave the battery for later.', 2400); }
+        continue;
+      }
+      b.taken = true; b.prop.on = false;
+      this.world.touch();
+      tr.battery = Math.min(1, tr.battery + this.diff.trkRefill);
+      this.sounds.battery(); buzz(25);
+      this.ui.say(`Battery. Tracker at ${Math.round(tr.battery * 100)}%.`, 2400);
     }
   }
 
@@ -238,6 +309,7 @@ export class Session {
     this.state = 'caught'; this.caughtT = 0; this.caughtShown = false; this.blacked = false;
     this.deaths++;
     this.fearBoost = 1; this.fearNow = 1; this.interference = 0;
+    if (this.tracker) { this.tracker.on = false; this.tracker.flood = 1; }
     this.sounds.caught(); this.sounds.updateHum(false, 0, 0); this.sounds.setBreath(0, 0, 0); this.sounds.setDread(1);
     buzz([80, 40, 260, 60, 120]);
   }
@@ -277,6 +349,7 @@ export class Session {
     const p = this.player, c = this.checkpoint;
     p.x = c.x; p.z = c.z; p.yaw = c.yaw; p.pitch = 0; p.crouched = false; p.stamina = 1; p.winded = false;
     this.scanner.heat = 0; this.scanner.overheated = false; this.scanner.charge = 0;
+    this.hands.reset(); this.restoreTracker(c);
     this.fx.black = 0; this.fearBoost = 0; this.sounds.setDread(0);
     if (this.stalker) {
       const st = this.stalker, finale = st.state === 'finale';
@@ -303,9 +376,10 @@ export class Session {
   }
 
   snapshot() {
-    const p = this.player;
+    const p = this.player, tr = this.tracker;
     return {x: p.x, z: p.z, yaw: p.yaw, pitch: p.pitch, time: this.time, deaths: this.deaths,
-      got: this.cores.map(c => c.got), seed: this.seed, checkpoint: this.checkpoint};
+      got: this.cores.map(c => c.got), seed: this.seed, checkpoint: this.checkpoint,
+      tracker: tr ? {battery: tr.battery, owned: tr.owned, taken: this.batteries.map(b => b.taken), trackerTaken: !!this.L.tracker?.taken} : null};
   }
 
   restore(d) {
@@ -318,6 +392,7 @@ export class Session {
       const c = this.cores[i];
       if (g && c && !c.got) { c.got = true; c.orb.on = false; this.coresGot++; }
     });
+    if (d.tracker) this.restoreTracker(d.tracker);
     this.world.touch();
     if (this.coresLeft === 0 && this.cores.length) this.allCores();
   }

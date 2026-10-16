@@ -203,6 +203,49 @@ export class Sounds {
     for (let i = 0; i < 4; i++) this.e.noise(0.012, 0.03, {filter: 'highpass', freq: 3000, at: Math.random() * 0.2, echo: false});
   }
 
+  // ---------------------------------------------------------------- the motion tracker (in your hand)
+  /** The pulse, once a second: a dry tick, a falling tone with the cave's tail on it, a breath of air. */
+  trackerPulse() {
+    const e = this.e, ui = e.ui;
+    e.noise(0.02, 0.012, {filter: 'highpass', freq: 4000, echo: false, bus: ui});
+    e.tone(1150, 0.022, 0.16, {to: 980, bus: ui, echo: true});
+    e.noise(0.008, 0.35, {filter: 'bandpass', freq: 2600, to: 900, q: 2, attack: 0.03, bus: ui, echo: false});
+  }
+  /** Something moved: the nearer (0 far .. 1 on you), the higher and louder; very near, a double beep. */
+  trackerReturn(close, pan = 0) {
+    const e = this.e, f = 600 * Math.pow(2, 1.2 * clamp(close, 0, 1)), g = 0.02 + 0.022 * close;
+    e.tone(f, g, 0.09, {type: 'triangle', pan, bus: e.ui, echo: false});
+    e.tone(f * 2, g * 0.35, 0.07, {pan, bus: e.ui, echo: false});
+    if (close > 0.8) e.tone(f * 1.06, g, 0.08, {type: 'triangle', pan, at: 0.12, bus: e.ui, echo: false});
+  }
+  /** Right on top of you: frantic beeps through static. */
+  trackerFrantic() {
+    for (let i = 0; i < 3; i++) this.e.tone(1600, 0.012, 0.045, {type: 'square', at: i * 0.07, bus: this.e.ui, echo: false});
+    this.crackle();
+  }
+  trackerBoot() {
+    [660, 880, 1320].forEach((f, i) => this.e.tone(f, 0.014, 0.06, {at: i * 0.06, bus: this.e.ui, echo: false}));
+    this.e.noise(0.01, 0.08, {filter: 'highpass', freq: 2500, at: 0.02, bus: this.e.ui, echo: false});
+  }
+  trackerOff() { this.e.tone(900, 0.012, 0.15, {to: 250, bus: this.e.ui, echo: false}); }
+  trackerLow() {
+    this.e.tone(1200, 0.015, 0.06, {type: 'square', bus: this.e.ui, echo: false});
+    this.e.tone(900, 0.015, 0.06, {type: 'square', at: 0.12, bus: this.e.ui, echo: false});
+  }
+  /** Running flat: the screen dies with a falling whine. */
+  trackerDead() {
+    this.e.tone(400, 0.02, 0.35, {type: 'sawtooth', to: 60, bus: this.e.ui, echo: false});
+    this.e.noise(0.03, 0.02, {freq: 1200, at: 0.3, bus: this.e.ui, echo: false});
+  }
+  /** Raising a dead one: just the switch. */
+  trackerClick() { this.e.noise(0.035, 0.02, {freq: 1400, bus: this.e.ui, echo: false}); this.e.tone(140, 0.015, 0.05, {bus: this.e.ui, echo: false}); }
+  /** A battery snapped in: two clacks and the charge whining up. */
+  battery() {
+    const e = this.e;
+    e.noise(0.05, 0.02, {freq: 1800, bus: e.ui, echo: false}); e.noise(0.04, 0.02, {freq: 1500, at: 0.09, bus: e.ui, echo: false});
+    e.tone(300, 0.015, 0.4, {to: 1400, at: 0.12, bus: e.ui, echo: false});
+  }
+
   // ---------------------------------------------------------------- the creature
   /** Where a creature sound sits: pan, loudness falloff, how much rock dulls it, how much cave. */
   at(x, z, muffle, base) {
@@ -354,6 +397,8 @@ export class Sounds {
       e.tone(987.77 * 0.97, p.g * 0.6, 0.6, {...o, to: 900}); e.tone(1975.5 * 0.95, p.g * 0.2, 0.4, {...o, to: 1700});
     } else if (kind === 'chime') {
       [1046.5, 783.99, 659.25, 523.25].forEach((f, j) => e.tone(f * 0.94, p.g * 0.6, 0.9, {...o, at: j * 0.16, to: f * 0.9}));
+    } else if (kind === 'tracker') { // your tracker's tick, from somewhere it is not
+      for (let i = 0; i < 3; i++) e.tone(1150 * 0.96, p.g * 0.5, 0.16, {...o, at: i * 1.02, to: 930});
     } else {
       for (let i = 0; i < 3; i++) e.noise(p.g * 0.8, 0.09, {freq: 240, at: i * 0.47, pan: p.pan, rev: p.rev});
     }

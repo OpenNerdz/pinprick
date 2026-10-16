@@ -71,6 +71,8 @@ export default {
     {x: 32, y: 3.0, z: 22.6, face: 'e', w: 4.6, h: 1.2, text: 'IT FOLLOWS THE HUM'},
   ],
   hides: [{x: 3.5, z: 24.4, r: 0.9}, {x: 48.6, z: 34.4, r: 0.9}, {x: 47.8, z: 16.4, r: 0.9}, {x: 3.5, z: 7.2, r: 0.8}],
+  // long-room bench, south-east crate, east hall corner, west-shaft crate, lift-room machinery, middle room
+  batteries: {spots: [[19, 34.45, 0.45], [39.5, 38.35, 1.2], [34.0, 27.4], [14, 15.35, 0.8], [37.5, 6.85, 1.0], [29.2, 14.8]]},
   ghosts: [[5, 34], [9, 29], [9, 22], [16, 17], [19, 15], [23, 15], [29, 15], [31, 18.5]],
   triggers: [
     {x: 19, z: 21, r: 1.5, cores: 2, actions: [['silence', 3], ['behind', 2.4]]},

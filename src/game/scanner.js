@@ -11,11 +11,16 @@ import {buzz} from '../ui/haptics.js';
 
 let cr = 0, cg = 0, cb = 0;
 
+/** Things worth finding (cores, the exit, notes, batteries) come back as bigger dots. */
+const KEY = [false, false, false, true, true, true, false, true];
+const key = m => KEY[m] === true;
+
 /** Dot colour for a hit: warm near, cold far, with per-material tweaks. Writes cr/cg/cb. */
 function colorFor(m, t, nd, x, y, z, nx, nz, decals, tintFlesh) {
   if (m === MAT.CORE) { cr = 1; cg = 0.24; cb = 0.55; }
   else if (m === MAT.EXIT) { cr = 1; cg = 0.76; cb = 0.28; }
   else if (m === MAT.NOTE) { cr = 0.55; cg = 1; cb = 0.68; }
+  else if (m === MAT.BATTERY) { cr = 0.8; cg = 1; cb = 0.22; } // the tracker's phosphor lime
   else if (m === MAT.WALL && decals.length && decalAt(decals, x, y, z, nx, nz)) { cr = 1; cg = 0.16; cb = 0.1; }
   else {
     const u = clamp((t - 0.6) / 24, 0, 1);
@@ -133,7 +138,7 @@ export class Scanner {
         const k = jit * Math.min(1, hit.t / 6);
         if (Math.random() < jam * 0.14) { cr = 0.9; cg = 0.08; cb = 0.06; }
         dots.push(px + (Math.random() - 0.5) * k, py + (Math.random() - 0.5) * k, pz + (Math.random() - 0.5) * k, T, cr, cg, cb, size0 * (0.8 + Math.random() * 0.5));
-      } else dots.push(px, py, pz, T, cr, cg, cb, size0 * (0.8 + Math.random() * 0.5) * (hit.m >= MAT.CORE && hit.m <= MAT.NOTE ? 1.35 : 1));
+      } else dots.push(px, py, pz, T, cr, cg, cb, size0 * (0.8 + Math.random() * 0.5) * (key(hit.m) ? 1.35 : 1));
       if (hit.actor) { hit.actor.lastHit = T; hit.actor.hits++; }
       if (beams && i % stride === 0) renderer.addLine(ox, oy, oz, px, py, pz, cr, cg, cb, 0.05, 0.22);
       if (hit.m === MAT.CORE) this.sonCore = true;
@@ -193,7 +198,7 @@ export class Scanner {
         }
         const px = tx + nx * 0.02, py = ty + nyy * 0.02, pz = tz + nz * 0.02;
         colorFor(m, t, Math.abs(dx * nx + dy * nyy + dz * nz), px, py, pz, nx, nz, decals, diff.tintFlesh);
-        dots.push(px, py, pz, T, cr, cg, cb, clamp(eyeT * mPerPx, 0.007, 0.034) * (0.85 + Math.random() * 0.3) * (m >= MAT.CORE && m <= MAT.NOTE ? 1.5 : 1));
+        dots.push(px, py, pz, T, cr, cg, cb, clamp(eyeT * mPerPx, 0.007, 0.034) * (0.85 + Math.random() * 0.3) * (key(m) ? 1.5 : 1));
         if (actor) { actor.lastHit = T; actor.hits++; }
         if (fanCol) fan.push([px, py, pz, eyeT]);
         if (lastRow && c % lstride === 0) renderer.addLine(ox, oy, oz, px, py, pz, cr, cg, cb, 0.12, 0.35);
