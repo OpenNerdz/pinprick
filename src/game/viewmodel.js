@@ -6,12 +6,13 @@
 //   strafing: tilts into the turn       sprinting: lowered and turned in
 //   charging: the barrel trembles       sweep: a kick back and up
 //   overheated: dips and shakes         against a wall: pulled back and raised
-//   caught: it falls out of your hands  tracker up: it drops out of the way
+//   caught: it falls out of your hands
 //
-// The motion tracker has its own pose in your other hand: it comes up from below with a little
-// overshoot, sits low in the middle of the view facing you (sized to the screen, so it reads on a
-// phone), nods with each pulse, shakes when something is right on top of you, and falls when you are
-// caught. A dead one lifts a little when you try it, and drops again.
+// The motion tracker has its own pose in your other hand, on the other side of the view from the
+// scanner: it comes up from below with a little overshoot, faces you (sized to the screen, so it reads
+// on a phone, and on touch screens held higher so the thumb on the stick does not cover it), nods with
+// each pulse, shakes when something is right on top of you, and falls when you are caught. A dead one
+// lifts a little when you try it, and drops again.
 
 import {mat4, identity, translate, rotateX, rotateY, rotateZ, scale, transformPoint} from '../util/mat4.js';
 import {MUZZLE} from '../render/gunmesh.js';
@@ -23,9 +24,15 @@ import {clamp} from '../util/math.js';
 // where the gun sits: a fixed spot on screen (so it looks the same in portrait and landscape),
 // this far ahead, at this size, with the barrel aimed at a point this far down the view
 const SPOT = {ndcX: 0.44, ndcY: -0.6, z: -0.46, size: 0.8, aim: 6};
-// the tracker: low and central (on a phone the thumbstick has one side and the pads the other), its
-// screen this share of the view's height (landscape) or width (portrait)
-const TSPOT = {ndcX: -0.05, ndcY: -0.36, z: -0.3, fill: 0.38, portrait: {ndcX: 0, ndcY: -0.2, fill: 0.5}};
+// the tracker: in the other hand, on the left (the right when left-handed), its screen this share of the
+// view's height (landscape) or width (portrait). On touch screens the thumbstick is down in that corner,
+// so it is held higher, clear of the thumb.
+const TSPOT = {
+  z: -0.3,
+  mouse: {ndcX: -0.56, ndcY: -0.5, fill: 0.27},
+  touch: {ndcX: -0.6, ndcY: -0.02, fill: 0.27},
+  portrait: {ndcX: -0.4, ndcY: -0.08, fill: 0.36},
+};
 const SCREEN_W = TRACKER_SCREEN.x1 - TRACKER_SCREEN.x0;
 const backOut = t => { const c = 1.6, u = t - 1; return 1 + (c + 1) * u * u * u + c * u * u; };
 
@@ -77,15 +84,13 @@ export class ViewModel {
     const ndcX = cam.aspect < 1 ? 0.3 : SPOT.ndcX, ndcY = cam.aspect < 1 ? -0.56 : SPOT.ndcY;
     const th = Math.tan(cam.vfov / 2), bx = ndcX * th * cam.aspect * -SPOT.z, by = ndcY * th * -SPOT.z;
     const byaw = Math.atan2(bx, SPOT.aim + SPOT.z), bpitch = Math.atan2(-by, SPOT.aim + SPOT.z);
-    // the tracker coming up puts the scanner down, right out of view
-    const away = s.hands ? 1 - s.hands.gun : 0, aw = away * away * (3 - 2 * away);
-    let x = bx + Math.cos(b) * 0.011 * m * calm + jx + 0.03 * this.lower + 0.06 * aw;
+    let x = bx + Math.cos(b) * 0.011 * m * calm + jx + 0.03 * this.lower;
     let y = by - Math.abs(Math.sin(b)) * 0.013 * m * calm + Math.sin(T * 1.3) * 0.003 * calm + jy
-      - 0.09 * this.lower - 0.03 * this.retract - 0.45 * this.drop + 0.012 * p.crouchT - 0.3 * aw;
+      - 0.09 * this.lower - 0.03 * this.retract - 0.45 * this.drop + 0.012 * p.crouchT;
     let z = SPOT.z + 0.04 * this.kick + 0.13 * this.retract - (sc.firing ? 0.008 * sc.charge : 0);
-    let yaw = byaw + this.lagYaw + 0.4 * this.lower + 0.3 * aw;
+    let yaw = byaw + this.lagYaw + 0.4 * this.lower;
     let pitch = bpitch + this.sweepAim + this.lagPitch + 0.16 * this.kick + 0.55 * this.retract - 0.5 * this.lower
-      - (sc.overheated ? 0.18 : 0) + Math.sin(T * 1.1) * 0.006 * calm - 1.1 * this.drop - 0.7 * aw;
+      - (sc.overheated ? 0.18 : 0) + Math.sin(T * 1.1) * 0.006 * calm - 1.1 * this.drop;
     let roll = this.roll + Math.cos(b) * 0.02 * m * calm + 0.05 * p.crouchT + (sc.overheated ? 0.12 : 0) + 0.7 * this.drop;
     if (lefty) { x = -x; yaw = -yaw; roll = -roll; }
 
@@ -105,7 +110,8 @@ export class ViewModel {
 
   /** The tracker in your other hand: see the header. */
   trackerPose(dt, T, s, cam, lefty, calm) {
-    const p = s.player, h = s.hands, tr = s.tracker, portrait = cam.aspect < 1, P = portrait ? TSPOT.portrait : TSPOT;
+    const p = s.player, h = s.hands, tr = s.tracker, portrait = cam.aspect < 1;
+    const P = portrait ? TSPOT.portrait : s.touch ? TSPOT.touch : TSPOT.mouse;
     const th = Math.tan(cam.vfov / 2), zz = TSPOT.z;
     const bx = P.ndcX * th * cam.aspect * -zz, by = P.ndcY * th * -zz;
     const size = P.fill * 2 * th * -zz * (portrait ? cam.aspect : 1) / SCREEN_W;

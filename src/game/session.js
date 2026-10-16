@@ -24,7 +24,7 @@ const STILL = {moveX: 0, moveY: 0, lookX: 0, lookY: 0, sprint: false, firing: fa
 
 export class Session {
   /**
-   * opts: {difficulty, seed, renderer, sounds, ui, reduceMotion, demo}
+   * opts: {difficulty, seed, renderer, sounds, ui, reduceMotion, demo, lefty, touch}
    * ui hooks: say(text, ms), note(note), caught(), won(stats), cores(got, total)
    */
   constructor(def, opts) {
@@ -50,6 +50,7 @@ export class Session {
     this.tracker = this.demo ? null : new Tracker(this.diff, this.seed, !this.L.tracker, this.L.tracker ? 0 : this.diff.trkStart);
     this.viewmodel = new ViewModel();
     this.lefty = !!opts.lefty;
+    this.touch = !!opts.touch; // touch controls: the tracker is held clear of the thumbstick
     this.signal = new Signal();
     this.statue = null;
     if (this.L.statue) {
@@ -153,7 +154,7 @@ export class Session {
     const msg = p.update(dt, intent, this.world, this.noiseFn, this.sounds, this.reduceMotion);
     if (msg) this.ui.say(msg, 2200);
     cam.set(p.x, p.eye, p.z, p.yaw, p.pitch);
-    const hand = this.hands.update(dt, T, intent, this); // which device is up decides what the scanner may do
+    const hand = this.hands.update(dt, T, intent, this); // the tracker in your other hand
     this.viewmodel.update(dt, T, this, intent, cam, this.lefty, this.reduceMotion);
     this.sounds.e.listener.x = p.x; this.sounds.e.listener.z = p.z; this.sounds.e.listener.yaw = p.yaw;
 

@@ -32,8 +32,9 @@ each gets caught.
 The scanner in your hand is a real 3D model: every dot leaves its emitter, the coils light as it
 charges, the fins glow as it heats, and the screen on its back shows charge, heat and sweep.
 
-**The motion tracker** (Q or middle click; TRACK on touch) is the other hand's device, found in
-Intake. Once a second it ticks and a wave sweeps across its screen. Anything that moved within reach
+**The motion tracker** (Q or middle click; TRACK on touch) is held in your other hand, on the left
+(the right when left-handed; on touch screens it sits higher, clear of the thumbstick). You find it in
+Intake, and you can scan and sweep while it is up. Once a second it ticks and a wave sweeps across its screen. Anything that moved within reach
 lights up as a blip, ahead of you and straight through rock. A return beep rises in pitch as the blip
 gets closer. Its limits are what make it worth reading carefully:
 - **Only motion.** A creature that listens, waits, lingers or is pinned in your beam is invisible to it.
@@ -45,8 +46,8 @@ gets closer. Its limits are what make it worth reading carefully:
 Using it costs you, too:
 - **Batteries.** It runs on them: every raise costs a little, and it drains while it is up. Spare
   batteries are lime-green dots, and only some spots hold one.
-- **Your hands.** It takes your hands: while it is up you cannot scan. SCAN or SWEEP swaps back to the
-  scanner, and sprinting puts it away.
+- **Sprinting.** You can't read it at a run: sprinting puts it away, and raising it again costs
+  battery.
 - **The tick.** The creature hears it up close. On Normal and Hard the first tick may make it go silent
   and still, so it vanishes from the screen, and then it comes to look where the tick came from. If you
   keep ticking at it, it works out where you are, and it can copy the tick. Difficulty also sets the
@@ -96,7 +97,7 @@ src/
     scanner.js     trigger, heat and overheat, sweep, dot colours; rays leave the gun's emitter
     viewmodel.js   how the gun sits in your hands: sway, lag, recoil, sprint, wall pull-back
     stalker.js     the creature: hearing by path distance, patrol/investigate/hunt/search/finale
-    tracker.js     the motion tracker: battery, pulses, what moved, blips; hands.js swaps it with the scanner
+    tracker.js     the motion tracker: battery, pulses, what moved, blips; hands.js raises and lowers it
     scares.js      scripted triggers: figure behind you, slams, moving statue, footsteps
     signal.js      the signal bars and ping; static when the creature is near
     figures.js     creature / figure / statue shapes

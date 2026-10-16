@@ -77,7 +77,7 @@ test('the battery: a cost for every raise, a drain while it is up, and dead at z
   assert.equal(tr.battery, d.trkStart);
   let t = raise(s, 0);
   t = run(s, t, 4);
-  const used = d.trkStart - tr.battery, upFor = 4.8 - TRACKER.raise - TRACKER.gunDown / 2;
+  const used = d.trkStart - tr.battery, upFor = 4.8 - TRACKER.raise;
   assert.ok(Math.abs(used - (TRACKER.bootCost + upFor) / d.trkBattery) < 0.015, `used ${used.toFixed(3)}`);
   // flicking it up and down saves nothing: each full raise costs the boot
   t = run(s, t, dt, press('track')); t = run(s, t, 0.5);
@@ -128,25 +128,15 @@ test('the first level hands it to you on a bench', () => {
   assert.ok(says.some(x => typeof x === 'object' && /Press Q/.test(x.mouse) && /Tap TRACK/.test(x.touch)), 'and told how to use it');
 });
 
-test('it shares your hands: SCAN swaps back and fires, a sweep waits for the swap, sprinting puts it away', () => {
+test('it is in your other hand: you scan and sweep with it up, and sprinting puts it away', () => {
   const {s} = make(LEVELS[1]), h = s.hands, sc = s.scanner;
   let t = raise(s, 0);
-  assert.ok(h.trackerUp && s.tracker.on && !s.gunState(t), 'tracker up, scanner away');
-  let firedAt = -1; const t0 = t;
-  t = run(s, t, 1, T => { if (sc.firing && firedAt < 0) firedAt = T - t0; return press('firing')(); });
-  assert.ok(firedAt > 0.1 && firedAt < 0.5, `scanning ${firedAt.toFixed(2)} s after pressing SCAN`);
-  assert.ok(!s.tracker.on && h.trk < 0.01, 'and the tracker went down');
-  // too hot to fire: SCAN does not take the tracker away for nothing
-  t = run(s, t, 0.5); t = raise(s, t);
-  sc.overheated = true; sc.heat = 1;
+  assert.ok(h.trackerUp && s.tracker.on && s.gunState(t), 'tracker up, scanner still in hand');
   t = run(s, t, 0.5, press('firing'));
-  assert.ok(h.trackerUp, 'tracker stays up while the scanner is overheated');
-  sc.overheated = false; sc.heat = 0;
-  // the sweep is latched through the swap
-  t = run(s, t, dt, press('sweep')); t = run(s, t, 0.6);
-  assert.ok(sc.sweeping || sc.cooldown > 0, 'the sweep went off after the swap');
-  // sprinting
-  t = run(s, t, 3); t = raise(s, t);
+  assert.ok(sc.firing && s.tracker.on, 'scanning with the tracker up');
+  t = run(s, t, dt, press('sweep')); t = run(s, t, 0.3);
+  assert.ok(sc.sweeping && s.tracker.on, 'and sweeping');
+  t = run(s, t, 3);
   t = run(s, t, 0.6, () => ({...intent(), moveY: 1, sprint: true}));
   assert.equal(h.want, 'gun', 'sprinting put it away');
 });

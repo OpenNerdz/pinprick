@@ -28,16 +28,17 @@ export class Signal {
 
     if (this.static) {
       this.bars = Math.floor(Math.random() * 6);
-      if ((this.crackleT -= dt) <= 0) { this.crackleT = 0.18 + Math.random() * 0.25; s.sounds.crackle(); }
+      if ((this.crackleT -= dt) <= 0) { this.crackleT = 0.45 + Math.random() * 0.6; s.sounds.crackle(); }
       return;
     }
     if (!this.reading) return;
     this.bars = Math.ceil((1 - clamp(best / 30, 0, 1)) * 5);
     if ((this.pingT -= dt) <= 0) {
-      this.pingT = clamp(0.3 + best * 0.07, 0.35, 2.4);
+      // sparse and soft: a guide, not a metronome (it quickens as you close in)
+      this.pingT = clamp(1.0 + best * 0.1, 1.2, 4);
       const ddx = (tx - p.x) / (best || 1), ddz = (tz - p.z) / (best || 1);
       const pan = ddx * Math.cos(p.yaw) + ddz * Math.sin(p.yaw), front = ddx * Math.sin(p.yaw) - ddz * Math.cos(p.yaw);
-      const g = (0.014 + 0.05 * (1 - clamp(best / 30, 0, 1))) * (0.6 + 0.4 * Math.max(0, front));
+      const g = (0.01 + 0.032 * (1 - clamp(best / 30, 0, 1))) * (0.6 + 0.4 * Math.max(0, front));
       s.sounds.ping(this.exit, g, pan);
     }
   }

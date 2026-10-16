@@ -40,7 +40,6 @@ export const TRACKER = {
   waveTime: 0.55,                // seconds for a pulse to sweep out to full range
   boot: 0.35, bootCost: 1.5,     // the screen warming up after a raise; seconds of battery each raise costs
   raise: 0.3, lower: 0.18,       // bringing it up into view, putting it away
-  gunDown: 0.15, gunUp: 0.2,     // the scanner dropping out of the way, coming back
   minSpeed: 0.35,                // m/s: anything slower is invisible to it
   close: 4,                      // a moving contact this close floods the screen
   maxBlips: 6,
@@ -61,7 +60,7 @@ export const STALKER = {
   lingerDist: 3.2, lingerTime: [3.5, 5.5], // stops beside a hidden or motionless player and listens
   clearance: 1.4,                // it never walks closer than this to a player it has not noticed
   waitChance: 0.3, waitTime: [8, 14],      // sometimes stands silent and still instead of listening
-  mimicEvery: [16, 34], groanEvery: [9, 20],
+  mimicEvery: [30, 60], groanEvery: [18, 38], // rare enough that each one lands
   crawlBelow: 2.6,               // ceilings lower than this put it on all fours
   loseAfter: 4.5,                // seconds without a fix before a hunt turns into a search
   listenTime: [2.5, 5],

@@ -105,7 +105,6 @@ export class Hud {
     this.set('ret', E.reticle, 'width', cone.toFixed(0) + 'px');
     this.set('reth', E.reticle, 'height', cone.toFixed(0) + 'px');
     this.toggle('ret', E.reticle, 'hot', sc.overheated);
-    this.set('reta', E.reticle, 'opacity', s.hands && s.hands.gun < 0.5 ? '0' : ''); // no aim ring with the scanner put away
 
 
     // red edges when it is close, and a flash of red when its sonar washes over you

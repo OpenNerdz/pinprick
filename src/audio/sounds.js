@@ -3,8 +3,6 @@
 
 import {clamp} from '../util/math.js';
 
-const SCALE = [0, 3, 5, 7, 10];
-
 // vowel formants (Hz) for the creature's throat
 const VOWELS = {u: [300, 870, 2240], o: [450, 800, 2830], a: [730, 1090, 2440], e: [530, 1840, 2480], i: [270, 2290, 3010]};
 
@@ -115,7 +113,7 @@ export class Sounds {
     if (Math.abs(want - this.ambLevel) > 0.05) this.ambience(want, 2);
     this.ambT -= dt;
     if (this.ambT > 0 || fear > 0.5) return;
-    this.ambT = 5 + Math.random() * 12;
+    this.ambT = 14 + Math.random() * 22; // rare, so each one makes you stop
     const pan = Math.random() * 1.6 - 0.8, r = Math.random(), e = this.e;
     if (r < 0.3) { // metal creak: resonant band sweeping down
       e.noise(0.06, 1.6, {filter: 'bandpass', freq: 340 + Math.random() * 200, to: 160, q: 22, pan, attack: 0.3, echo: true, rev: 0.6, bus: e.amb});
@@ -142,12 +140,8 @@ export class Sounds {
     h.lfo.frequency.setTargetAtTime(11 + 33 * charge + interference * 20, t, 0.06);
   }
   trigger() { this.e.tone(330, 0.025, 0.07, {echo: false}); }
-  depth(dist, pan, gain = 0.03) {
-    const i = Math.round((1 - clamp(dist / 26, 0, 1)) * 14);
-    this.e.tone(196 * Math.pow(2, (Math.floor(i / 5) * 12 + SCALE[i % 5]) / 12), gain, 0.1 + 0.05 * Math.random(), {pan});
-  }
   coreBell() { this.e.tone(1318.5, 0.035, 0.8); this.e.tone(1975.5, 0.015, 0.6, {at: 0.04}); }
-  heatWarn() { this.e.tone(1760, 0.02, 0.06, {type: 'square', echo: false}); }
+  heatWarn() { this.e.tone(1760, 0.012, 0.05, {type: 'square', echo: false}); }
   overheat() {
     this.e.noise(0.09, 1.6, {filter: 'highpass', freq: 2500, to: 5000, echo: true});
     this.e.tone(220, 0.05, 0.5, {type: 'sawtooth', to: 70});
@@ -204,12 +198,11 @@ export class Sounds {
   }
 
   // ---------------------------------------------------------------- the motion tracker (in your hand)
-  /** The pulse, once a second: a dry tick, a falling tone with the cave's tail on it, a breath of air. */
+  /** The pulse, once a second: a dry tick and a short falling tone, quiet, so the room stays quiet. */
   trackerPulse() {
     const e = this.e, ui = e.ui;
-    e.noise(0.02, 0.012, {filter: 'highpass', freq: 4000, echo: false, bus: ui});
-    e.tone(1150, 0.022, 0.16, {to: 980, bus: ui, echo: true});
-    e.noise(0.008, 0.35, {filter: 'bandpass', freq: 2600, to: 900, q: 2, attack: 0.03, bus: ui, echo: false});
+    e.noise(0.012, 0.01, {filter: 'highpass', freq: 4000, echo: false, bus: ui});
+    e.tone(1150, 0.011, 0.12, {to: 980, bus: ui, echo: false});
   }
   /** Something moved: the nearer (0 far .. 1 on you), the higher and louder; very near, a double beep. */
   trackerReturn(close, pan = 0) {
@@ -223,11 +216,8 @@ export class Sounds {
     for (let i = 0; i < 3; i++) this.e.tone(1600, 0.012, 0.045, {type: 'square', at: i * 0.07, bus: this.e.ui, echo: false});
     this.crackle();
   }
-  trackerBoot() {
-    [660, 880, 1320].forEach((f, i) => this.e.tone(f, 0.014, 0.06, {at: i * 0.06, bus: this.e.ui, echo: false}));
-    this.e.noise(0.01, 0.08, {filter: 'highpass', freq: 2500, at: 0.02, bus: this.e.ui, echo: false});
-  }
-  trackerOff() { this.e.tone(900, 0.012, 0.15, {to: 250, bus: this.e.ui, echo: false}); }
+  trackerBoot() { this.e.tone(660, 0.01, 0.06, {bus: this.e.ui, echo: false}); this.e.tone(1320, 0.008, 0.06, {at: 0.07, bus: this.e.ui, echo: false}); }
+  trackerOff() { this.e.tone(700, 0.007, 0.1, {to: 300, bus: this.e.ui, echo: false}); }
   trackerLow() {
     this.e.tone(1200, 0.015, 0.06, {type: 'square', bus: this.e.ui, echo: false});
     this.e.tone(900, 0.015, 0.06, {type: 'square', at: 0.12, bus: this.e.ui, echo: false});

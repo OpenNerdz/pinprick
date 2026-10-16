@@ -161,7 +161,7 @@ function boot(hotData) {
       say, note: openNote, caught: showCaught, won: showWon,
       cores: () => {},
     };
-    session = new Session(def, {difficulty: settings.difficulty, renderer, sounds, ui, reduceMotion, seed: snap?.seed, lefty: settings.swap});
+    session = new Session(def, {difficulty: settings.difficulty, renderer, sounds, ui, reduceMotion, seed: snap?.seed, lefty: settings.swap, touch: input.touch});
     if (snap) session.restore(snap);
     attract = null;
     clock = 0;
@@ -290,7 +290,7 @@ function boot(hotData) {
     if (app === 'play') pause();
     else if (app === 'paused' && why === 'key') resume();
   };
-  input.onTouchMode = () => { stage.classList.add('touch'); renderHow(); };
+  input.onTouchMode = () => { stage.classList.add('touch'); renderHow(); if (session) session.touch = true; };
   input.onMouseMode = () => renderHow();
   if (input.touch) stage.classList.add('touch');
   document.addEventListener('visibilitychange', () => {

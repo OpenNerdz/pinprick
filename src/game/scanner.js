@@ -41,10 +41,10 @@ export class Scanner {
   constructor() {
     this.charge = 0; this.heat = 0; this.overheated = false; this.coolWait = 0;
     this.firing = false; this.wasFiring = false;
-    this.scanAcc = 0; this.blipAcc = 0; this.coreBell = 0; this.noiseT = 0; this.warnT = 0;
+    this.scanAcc = 0; this.coreBell = 0; this.noiseT = 0; this.warnT = 0;
     this.sweepP = -1; this.sweepRow = 0; this.rows = 0; this.cols = 0; this.pitch = 4;
-    this.cooldown = 0; this.sweepBlip = 0; this.sweepBell = 0;
-    this.sonT = -1; this.sonCore = false;
+    this.cooldown = 0; this.sweepBell = 0;
+    this.sonCore = false;
   }
 
   get sweeping() { return this.sweepP >= 0; }
@@ -62,7 +62,7 @@ export class Scanner {
     if (firing) {
       this.heat = Math.min(1, this.heat + dt * (SCANNER.heatRate + SCANNER.heatRateCharge * this.charge) * diff.heat);
       this.coolWait = SCANNER.coolDelay;
-      if (this.heat > 0.8 && (this.warnT -= dt) <= 0) { this.warnT = 0.28 - (this.heat - 0.8); sounds.heatWarn(); }
+      if (this.heat > 0.8 && (this.warnT -= dt) <= 0) { this.warnT = 0.7 - (this.heat - 0.8) * 1.5; sounds.heatWarn(); }
       if (this.heat >= 1) {
         this.overheated = true; sounds.overheat(); buzz([40, 30, 40]);
         ctx.noise(ctx.x, ctx.z, NOISE.overheat, false);
@@ -79,9 +79,7 @@ export class Scanner {
     sounds.updateHum(this.firing, this.charge, this.heat, ctx.interference || 0);
 
     if (this.firing) {
-      this.spray(dt, T, ctx, this.charge, true, 0);
-      this.blipAcc += (8 + 18 * this.charge) * dt;
-      if (this.blipAcc >= 1 && this.sonT > 0) { this.blipAcc = 0; sounds.depth(this.sonT, (Math.random() - 0.5) * 0.5); }
+      this.spray(dt, T, ctx, this.charge, true, 0); // the hum is its sound; only a core rings out over it
       this.coreBell -= dt;
       if (this.sonCore && this.coreBell <= 0) { this.coreBell = 0.5; sounds.coreBell(); }
       if ((this.noiseT -= dt) <= 0) {
@@ -124,7 +122,7 @@ export class Scanner {
     const ux = -rz * ay, uy = rz * ax - rx * az, uz = rx * ay;
     const fxx = ax, fyy = ay, fzz = az;
     const jam = ctx.interference || 0, jit = 0.35 * jam;
-    this.sonT = -1; this.sonCore = false;
+    this.sonCore = false;
     for (let i = 0; i < n; i++) {
       if (jam > 0 && Math.random() < jam * 0.3) continue; // dropouts: rays that never come back
       const a = Math.random() * 6.2832, r = Math.sqrt(Math.random()) * tanH, sa = Math.cos(a) * r, sb = Math.sin(a) * r;
@@ -142,7 +140,6 @@ export class Scanner {
       if (hit.actor) { hit.actor.lastHit = T; hit.actor.hits++; }
       if (beams && i % stride === 0) renderer.addLine(ox, oy, oz, px, py, pz, cr, cg, cb, 0.05, 0.22);
       if (hit.m === MAT.CORE) this.sonCore = true;
-      if (this.sonT < 0 || Math.random() < 0.12) this.sonT = hit.t;
     }
   }
 
@@ -153,7 +150,7 @@ export class Scanner {
     const sp = Math.sqrt(w * h / 18000);
     this.pitch = sp;
     this.cols = Math.max(8, Math.ceil(w / sp)); this.rows = Math.max(8, Math.ceil(h / sp));
-    this.sweepP = 0; this.sweepRow = 0; this.cooldown = SCANNER.sweepCooldown; this.sweepBlip = 0; this.sweepBell = 0;
+    this.sweepP = 0; this.sweepRow = 0; this.cooldown = SCANNER.sweepCooldown; this.sweepBell = 0;
     ctx.sounds.sweep(SCANNER.sweepTime);
     ctx.noise(ctx.x, ctx.z, NOISE.sweep, true);
     buzz(15);
@@ -170,7 +167,7 @@ export class Scanner {
     const {fx, fy, fz, rx, rz, ux, uy, uz, ex, ey, ez} = cam;
     const o = ctx.origin, ox = o ? o[0] : ex, oy = o ? o[1] : ey, oz = o ? o[2] : ez;
     const fan = this.fan || (this.fan = []);
-    let son = -1, core = false;
+    let core = false;
     for (; this.sweepRow < target; this.sweepRow++) {
       const row = this.sweepRow, ny = 1 - (row + 0.5) / this.rows * 2, off = (row & 1) ? 0.25 : -0.25, lastRow = row === target - 1;
       if (lastRow) fan.length = 0;
@@ -203,13 +200,11 @@ export class Scanner {
         if (fanCol) fan.push([px, py, pz, eyeT]);
         if (lastRow && c % lstride === 0) renderer.addLine(ox, oy, oz, px, py, pz, cr, cg, cb, 0.12, 0.35);
         if (m === MAT.CORE) core = true;
-        if (son < 0 || Math.random() < 0.02) son = t;
       }
     }
     // the sheet of light from the emitter to the line it is painting
     renderer.addFan(ox, oy, oz, fan, 0.55, 0.95, 0.88);
-    this.sweepBlip += 15 * dt; this.sweepBell -= dt;
-    if (this.sweepBlip >= 1 && son > 0) { this.sweepBlip = 0; sounds.depth(son, (Math.random() - 0.5) * 0.8, 0.022); }
+    this.sweepBell -= dt;
     if (core && this.sweepBell <= 0) { this.sweepBell = 0.6; sounds.coreBell(); }
     if (this.sweepRow >= this.rows) { this.sweepP = -1; sounds.sweepEnd(); }
   }
