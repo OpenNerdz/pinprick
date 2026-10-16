@@ -118,20 +118,24 @@ test('overheating cuts the scanner out until it cools', () => {
   assert.equal(s.scanner.overheated, false, 'recovers after cooling');
 });
 
-test('holding the scanner on it makes it freeze, turn, then charge on all fours', () => {
+test('holding the scanner on it pins it; let go and it charges on all fours', () => {
   const {s} = makeSession(LEVELS[1]);
   const st = s.stalker, cam = new Camera(), dt = 1 / 30;
   st.wake(); st.hear = () => {};           // deaf, so only the light can give you away
   st.x = 17; st.z = 16.5; st.enter('wait', 0); st.timer = 99;
   s.player.x = 17; s.player.z = 24.5; s.player.yaw = 0; s.player.pitch = 0.05;
-  const seen = [];
-  for (let t = 0; t < 6 && s.state === 'play'; t += dt) {
+  const seen = [], z0 = st.z;
+  let t = 0;
+  for (; t < 6 && s.state === 'play'; t += dt) {
     const it = intent(); it.firing = true;
     s.update(dt, t, it, cam, view);
     if (seen[seen.length - 1] !== st.state) seen.push(st.state);
   }
   assert.deepEqual(seen.slice(0, 3), ['wait', 'alert', 'hunt'], `went ${seen.join(' > ')}`);
-  assert.ok(st.actor.crawl > 0.5 || s.state === 'caught', 'drops to all fours to hunt');
+  assert.ok(st.pinned, 'held in the beam');
+  assert.ok(st.z - z0 < 3, `in the light it only drags itself forward (${(st.z - z0).toFixed(1)} m in 6 s)`);
+  for (const end = t + 1.5; t < end && s.state === 'play'; t += dt) s.update(dt, t, intent(), cam, view);
+  assert.ok(!st.pinned && (st.actor.crawl > 0.5 || s.state === 'caught'), 'let go, and it comes on all fours');
 });
 
 test('it stops beside a hidden player, and finds them the moment they stand', () => {

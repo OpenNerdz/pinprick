@@ -64,7 +64,7 @@ export default {
     {x: 9.5, z: 36.5, title: 'Operator log, day 9',
       text: 'The lift still works. I heard it run once, the whole cage rattling up the shaft. It is in the north-east corner, behind the amber door.\n\nThe door wants four cores.'},
     {x: 30.2, z: 25.7, title: 'Operator log, last',
-      text: 'I could not get the fourth core. It was standing over it.\n\nIf you are reading this: it follows the hum. Let go of the trigger and let it walk past.'},
+      text: 'I could not get the fourth core. It was standing over it.\n\nIf you are reading this: it follows the hum. Let go of the trigger and let it walk past. If your steps sound doubled, it is behind you. Stand still until the clicking stops, or turn and give it the light.'},
   ],
   decals: [
     {x: 20, y: 1.6, z: 32, face: 's', w: 5.6, h: 1.1, text: 'THE LIFT STILL WORKS'},

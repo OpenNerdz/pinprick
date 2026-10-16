@@ -60,7 +60,7 @@ export default {
     {x: 12.8, z: 37, title: 'Operator log, day 6',
       text: 'The cistern is where it sleeps, I think. The pillars throw the hum around, so it cannot tell where you are. Neither can you.\n\nThe crawls on both sides go straight into the hall. It cannot follow you in there.'},
     {x: 36.8, z: 3.6, title: 'Operator log, day 7',
-      text: 'Something shut the south gate behind me. I did not hear it walk. The long way round is down the east corridor.'},
+      text: 'Something shut the south gate behind me. I did not hear it walk. The long way round is down the east corridor.\n\nTwice today my footsteps came back to me a beat late. I stopped, and they stopped. When I turned the scanner round, it was there, and it ran. It does not like being seen.'},
   ],
   decals: [
     {x: 28, y: 3.2, z: 14, face: 's', w: 6, h: 1.4, text: 'COUNT TO TEN\nBEFORE YOU SCAN'},

@@ -2,7 +2,7 @@
 // scripted scares, and advances them together each frame. The UI talks to it through `ui` hooks
 // and reads its public fields for the HUD.
 
-import {CELL, DIFFICULTY, DOTS, NOISE, PLAYER_R, SCANNER} from '../config.js';
+import {CELL, DIFFICULTY, DOTS, NOISE, PLAYER_R, SCANNER, STALKER} from '../config.js';
 import {rng, angleDiff, clamp} from '../util/math.js';
 import {compileLevel, CORE_PICKUP, EXIT_RADIUS, NOTE_PICKUP} from '../world/level.js';
 import {NavGrid} from '../world/nav.js';
@@ -60,9 +60,10 @@ export class Session {
     this.time = 0; this.deaths = 0; this.state = 'play';
     this.caughtT = 0;
     this.fearBoost = 0; this.seenAt = -99; this.fearNow = 0; this.wasLinger = false;
-    this.fx = {black: 0};     // read by the HUD: the blackout after it catches you
+    this.fx = {black: 0, ping: 0}; // read by the HUD: the blackout after it catches you, the red of its sonar on you
+    this.hinted = new Set();
     this.noises = [];
-    this.noiseFn = (x, z, loud, exact) => this.noise(x, z, loud, exact);
+    this.noiseFn = (x, z, loud, exact, kind) => this.noise(x, z, loud, exact, kind);
     this.coresGot = 0;
     this.meshVersion = -1;
     this.checkpoint = {x: this.L.start.x, z: this.L.start.z, yaw: this.L.start.yaw};
@@ -73,12 +74,14 @@ export class Session {
       r.setGhosts(bakeGhosts(this.world, this.L.ghosts, this.seed));
       this.syncMesh();
     }
+    if (this.stalker) this.stalker.dots = this.dots || null;
     if (this.stalker && this.L.stalker.wake === 'start') this.stalker.wake();
   }
 
   get coresLeft() { return this.cores.length - this.coresGot; }
 
-  noise(x, z, loud, exact) { this.noises.push({x, z, loud, exact}); }
+  /** A sound the creature may hear. `kind` is 'step' for footsteps (it can follow those), else anything. */
+  noise(x, z, loud, exact, kind = 'other') { this.noises.push({x, z, loud, exact, kind}); }
 
   syncMesh() {
     if (this.meshVersion === this.world.version) return;
@@ -153,8 +156,11 @@ export class Session {
       const linger = st.state === 'linger';
       if (linger && !this.wasLinger) this.ui.say("Don't move.", 2600);
       this.wasLinger = linger;
+      for (const e of st.events) this.creatureEvent(e);
+      st.events.length = 0;
     }
     this.fearBoost = Math.max(0, this.fearBoost - dt * 0.2);
+    this.fx.ping = Math.max(0, this.fx.ping - dt * 1.6);
     this.fearNow = Math.max(this.stalker ? this.stalker.fear() : 0, this.fearBoost * 0.8);
     this.interference = clamp((this.fearNow - 0.4) / 0.6, 0, 1);
     this.signal.update(dt, this);
@@ -168,6 +174,24 @@ export class Session {
   }
 
   syncActors() { this.renderer?.setActors(this.world.actors); }
+
+  /** Something the creature did that the player should feel, plus a one-time hint the first time. */
+  creatureEvent(e) {
+    if (e === 'windup') buzz([6, 50, 6, 50, 6]);
+    else if (e === 'sonar') {
+      this.fx.ping = 1; this.fearBoost = Math.max(this.fearBoost, 0.6);
+      this.hint('sonar', 'Red on the walls: it is listening. Do not move until it stops.');
+    } else if (e === 'found') this.sounds.sting();
+    else if (e === 'pinned') this.hint('pinned', 'The light holds it back. Not for long.');
+    else if (e === 'echo') this.hint('echo', 'Your footsteps sound doubled.');
+    else if (e === 'flee') this.hint('flee', 'It ran from the light.');
+  }
+
+  hint(key, text) {
+    if (!this.diff.hints || this.hinted.has(key) || this.demo) return;
+    this.hinted.add(key);
+    this.ui.say(text, 3800);
+  }
 
   /** The gun to draw this frame, or null when it should not be on screen. */
   gunState(T) {
@@ -258,6 +282,7 @@ export class Session {
       const st = this.stalker, finale = st.state === 'finale';
       st.wake(p, finale ? 'finale' : 'patrol', finale ? this.exit : null);
       if (finale) st.enter('finale', this.time);
+      else { st.graceFor = STALKER.respawnGrace; st.avoid = {x: c.x, z: c.z}; }
     }
     this.state = 'play';
   }

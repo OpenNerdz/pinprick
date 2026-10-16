@@ -7,15 +7,28 @@ it hears the scanner, your footsteps and the sweep.
 Four levels: **Intake** (tutorial, nothing hunting you), **Sublevel** (the original map, the creature
 wakes when you take the first core), **Cistern** and **Lift Shaft**.
 
-The creature groans, clicks, drags a foot and breathes with a rattle; it copies sounds it has heard you
-make. Hold your beam on it (a glance is safe) and it freezes, turns, shrieks and comes for you on all
-fours. It only knows what it hears or feels: keep still with the scanner off and it stops beside you to
+The creature groans, drags a foot and breathes with a rattle; it copies sounds it has heard you make.
+It only knows what it hears or feels: keep still with the scanner off and it stops beside you to
 listen, then goes another way. Once it has hunted you, though, it searches where it lost you, and then
-only a hiding spot is safe. Difficulty changes its wits as well as its ears: how fast it reacts, how hard
-it listens when it stops (you hear it clicking), whether it reads which way you ran, how long it
-searches, and whether it goes round to wait at the far end of a crawl. The scanner in your hand is a real 3D model: every dot leaves its
-emitter, the coils light as it charges, the fins glow as it heats, and the screen on its back shows
-charge, heat and sweep.
+only a hiding spot is safe. Three things make it this game's monster:
+
+- **It has a scanner too.** When it listens it clicks, and a moment later the echo splashes red dots
+  over everything around it. Whatever moves inside that red, it finds. Freeze on the first click.
+- **Light holds it.** Keep your beam on it (a glance is safe) and it knows where you are, but it can
+  only drag itself toward you, rearing up in the light. Let go, or overheat, and it surges.
+- **It walks in step with you.** Having lost you, it may follow your footsteps from a dozen metres back,
+  stepping only when you step, so your steps sound doubled. Each step it closes in, and at arm's length
+  it pounces. Stand still until it gives up the trail, or turn and touch it with the beam, and it bolts.
+
+Difficulty changes its wits as well as its ears: how fast it reacts, how far its sonar reaches and how
+long the clicks warn you, how hard the light holds it, how often and how fast it stalks, whether it
+reads which way you ran, how long it searches, and whether it goes round to wait at the far end of a
+crawl. After you are caught it keeps away from where you come back for a while. `node
+tools/balance.mjs` plays scripted players against it on every level and difficulty and prints how often
+each gets caught.
+
+The scanner in your hand is a real 3D model: every dot leaves its emitter, the coils light as it
+charges, the fins glow as it heats, and the screen on its back shows charge, heat and sweep.
 
 ## Build and run
 

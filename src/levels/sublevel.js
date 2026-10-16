@@ -7,7 +7,7 @@ export default {
   id: 'sublevel',
   name: 'Sublevel',
   blurb: 'Three cores somewhere in the dark. Something wakes when you take the first.',
-  intro: {touch: 'Three cores this time. Move quietly.', mouse: 'Three cores this time. Move quietly.'},
+  intro: {touch: 'Three cores this time. Move quietly. If the walls turn red, freeze.', mouse: 'Three cores this time. Move quietly. If the walls turn red, freeze.'},
   map: [
     '###################',
     '##...........######',
@@ -63,9 +63,9 @@ export default {
   statue: {x: 24.6, z: 5.0, face: Math.PI, lift: 0.9},
   notes: [
     {x: 13.4, z: 24.6, title: 'Operator log, day 3',
-      text: 'It does not see. I am sure of that now. It came down the hall while I stood still with the scanner off, and it walked straight past me.\n\nIt was listening.'},
+      text: 'It does not see. I am sure of that now. It came down the hall while I stood still with the scanner off, and it walked straight past me.\n\nIt was listening. When it listens it clicks, and a moment later the walls light up red around it, like it has a scanner of its own. Whatever moves in that red, it finds. Freeze on the first click.'},
     {x: 16.8, z: 7.2, title: 'Operator log, day 4',
-      text: 'Do not hold the trigger for long. The hum carries. The sweep is worse: it hears that from anywhere on the level.\n\nWhen the signal fills with static, it is close. Stop, crouch, wait.'},
+      text: 'Do not hold the trigger for long. The hum carries. The sweep is worse: it hears that from anywhere on the level.\n\nBut it hates the light. Hold the beam on it and it can barely move. It knows where you are, though, and the scanner always overheats in the end. Have somewhere to go.\n\nWhen the signal fills with static, it is close. Stop, crouch, wait.'},
   ],
   decals: [
     {x: 12, y: 2.1, z: 14.6, face: 'e', w: 3.2, h: 0.9, text: "DON'T RUN"},

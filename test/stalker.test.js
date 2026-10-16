@@ -86,7 +86,10 @@ test('it never camps the mouth of a crawl it cannot get into', () => {
   run(s, 0, 40);
   assert.equal(s.state, 'play');
   assert.ok(st.calm, `still ${st.state} after 40 s`);
-  assert.ok(Math.hypot(st.x - 7, st.z - 12.5) > 3 && Math.hypot(st.x - 7, st.z - 7.5) > 3, 'it has wandered off');
+  // from here on it goes about its patrol: it does not stand at either end of the crawl
+  let atMouth = 0;
+  run(s, 40, 20, () => { if (Math.min(Math.hypot(st.x - 7, st.z - 12.5), Math.hypot(st.x - 7, st.z - 7.5)) < 2) atMouth += dt; return intent(); });
+  assert.ok(atMouth < 10, `spent ${atMouth.toFixed(1)} of 20 s at a mouth of the crawl`);
 });
 
 test('on Normal and Hard it goes round to the far end of the crawl you escaped into; on Easy it does not', () => {
@@ -154,5 +157,106 @@ test('the last chase starts far from you and from the exit, and a careful run to
     assert.equal(st.state, 'finale');
     const fromYou = s.nav.distAt(s.nav.field(p.x, p.z), st.x, st.z), fromExit = s.nav.distAt(s.nav.field(s.exit.x, s.exit.z), st.x, st.z);
     assert.ok(fromYou > 15 && fromExit > 10, `${def.id}: starts ${fromYou.toFixed(0)} m from you, ${fromExit.toFixed(0)} m from the exit`);
+  }
+});
+
+// ---------------------------------------------------------------- its own tricks: sonar, light, stalking
+
+/** Steer the player along the walkable grid toward (tx, tz) for one frame. */
+function steer(s, it, tx, tz, memo) {
+  const p = s.player, nav = s.playerNav;
+  if (!memo.path || memo.i++ % 8 === 0) memo.path = nav.path(nav.field(p.x, p.z), tx, tz, 1.2);
+  if (!memo.path || memo.path.length < 2) return it;
+  const k = Math.min(memo.path.length - 1, 3), wx = nav.cx(memo.path[k]), wz = nav.cz(memo.path[k]);
+  let d = Math.atan2(wx - p.x, -(wz - p.z)) - p.yaw;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  it.lookX = d; it.moveY = 1;
+  return it;
+}
+
+test('its sonar: moving inside the red echo gives you away; keeping still does not', () => {
+  // [difficulty, crouched, moving, found]
+  for (const [diff, crouch, move, want] of [['normal', true, true, true], ['normal', false, false, false], ['hard', false, false, false], ['easy', true, true, false], ['easy', false, true, true]]) {
+    const {s} = make(LEVELS[2], diff), st = s.stalker, p = s.player;
+    // north hall of the cistern, 6 m apart with nothing between
+    p.x = 20; p.z = 3; p.crouched = crouch;
+    st.wake(); st.x = 26; st.z = 3; st.enter('listen', 0); st.timer = 99; st.hear = noop; // only the sonar
+    st.sonarT = 0.05;
+    let pinged = false;
+    run(s, 0, 2.5, t => { const it = intent(); if (move) it.moveX = Math.sin(t * 6) > 0 ? 0.35 : -0.35; if (s.fx.ping > 0) pinged = true; return it; });
+    const found = st.state === 'alert' || st.state === 'hunt' || s.state !== 'play';
+    assert.ok(pinged, `${diff}: the echo washed over you`);
+    assert.equal(found, want, `${diff}, ${crouch ? 'crouched' : 'standing'}, ${move ? 'moving' : 'still'}`);
+  }
+});
+
+test('its sonar paints red dots where it listens', () => {
+  const {s} = make(LEVELS[2]), st = s.stalker, red = [];
+  st.dots = {push: (x, y, z, t, r, g, b) => { if (r > g * 4) red.push([x, y, z]); }};
+  s.player.x = 20; s.player.z = 3;
+  st.wake(); st.x = 26; st.z = 3; st.enter('listen', 0); st.timer = 99; st.sonarT = 0.05;
+  run(s, 0, 2);
+  assert.ok(red.length > 60, `${red.length} red dots`);
+  assert.ok(red.every(([x, , z]) => Math.hypot(x - 26, z - 3) < s.diff.sonar + 0.5), 'all within its reach');
+});
+
+test('the beam pins it: on Easy it cannot move at all, on Hard it still drags itself on', () => {
+  const moved = {};
+  for (const diff of ['easy', 'normal', 'hard']) {
+    const {s} = make(LEVELS[1], diff), st = s.stalker;
+    st.wake(); st.hear = noop; st.x = 17; st.z = 16.5; st.notice(17, 24.5, 0); st.enter('hunt', 0);
+    s.player.x = 17; s.player.z = 24.5; s.player.yaw = 0; s.player.pitch = 0.05;
+    let t = run(s, 0, 1, () => { const it = intent(); it.firing = true; return it; });
+    const z0 = st.z;
+    run(s, t, 3, () => { const it = intent(); it.firing = true; return it; });
+    moved[diff] = st.z - z0;
+    assert.ok(st.pinned, `${diff}: pinned`);
+  }
+  assert.ok(moved.easy < 0.2 && moved.normal < moved.hard && moved.hard < 3.5, JSON.stringify(moved));
+});
+
+test('stalking: it follows your footsteps, your steps sound doubled, and if you never look back it pounces', () => {
+  const {s, says} = make(LEVELS[2]), st = s.stalker, p = s.player, memo = {};
+  // south-west room, heading east along the south rooms with it twelve metres behind
+  p.x = 14; p.z = 35; st.wake(); st.x = 4; st.z = 35; st.fix(p.x, p.z, 0); st.enter('stalk', 0);
+  let stalked = 0;
+  run(s, 0, 40, () => { if (st.state === 'stalk') stalked += dt; return steer(s, intent(), 44, 36, memo); });
+  assert.ok(says.includes('Your footsteps sound doubled.'), 'the doubled-steps hint');
+  assert.ok(stalked > 4, `followed you for ${stalked.toFixed(1)} s`);
+  assert.equal(s.state, 'caught', `it pounced (state ${st.state})`);
+});
+
+test('stalking: stop, turn the beam on it, and it bolts into the dark', () => {
+  const {s} = make(LEVELS[2]), st = s.stalker, p = s.player, memo = {};
+  p.x = 14; p.z = 35; st.wake(); st.x = 4; st.z = 35; st.fix(p.x, p.z, 0); st.enter('stalk', 0);
+  let t = run(s, 0, 6, () => steer(s, intent(), 44, 36, memo));
+  assert.equal(st.state, 'stalk');
+  p.yaw = Math.atan2(st.x - p.x, -(st.z - p.z)); p.pitch = -0.05;
+  run(s, t, 3, () => { const it = intent(); it.firing = true; return it; });
+  assert.equal(s.state, 'play');
+  assert.ok(st.state === 'flee' || st.state === 'listen', `state ${st.state}`);
+  assert.ok(st.stalkAfter > t, 'and leaves you alone for a while');
+});
+
+test('stalking: switch the scanner on facing the wrong way and it comes for you', () => {
+  const {s} = make(LEVELS[2]), st = s.stalker, p = s.player, memo = {};
+  p.x = 14; p.z = 35; st.wake(); st.x = 4; st.z = 35; st.fix(p.x, p.z, 0); st.enter('stalk', 0);
+  let t = run(s, 0, 6, () => steer(s, intent(), 44, 36, memo));
+  assert.equal(st.state, 'stalk');
+  p.yaw = Math.atan2(p.x - st.x, -(p.z - st.z)); // away from it
+  run(s, t, 4, () => { const it = intent(); it.firing = true; return it; });
+  assert.ok(s.state === 'caught' || st.state === 'hunt', `state ${st.state}`);
+});
+
+test('after a respawn it keeps away from where you came back', () => {
+  const {s} = make(LEVELS[2]), st = s.stalker;
+  const c = s.checkpoint;
+  for (let k = 0; k < 6; k++) {
+    s.respawn();
+    let nearest = 1e9;
+    run(s, k * 30, 24, () => { if (st.target && st.state === 'patrol') nearest = Math.min(nearest, Math.hypot(st.target.x - c.x, st.target.z - c.z)); return intent(); });
+    assert.ok(nearest >= 16, `round ${k}: headed for a spot ${nearest.toFixed(1)} m from your respawn`);
+    assert.equal(s.state, 'play');
   }
 });

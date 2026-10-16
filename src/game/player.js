@@ -35,7 +35,7 @@ export class Player {
   }
 
   /**
-   * Advance one frame. `noise(x, z, loud)` reports sound to the creature; `sounds` plays footsteps.
+   * Advance one frame. `noise(x, z, loud, exact, kind)` reports sound to the creature; `sounds` plays footsteps.
    * Returns a short message when the player tried something that did not work.
    */
   update(dt, intent, world, noise, sounds, reduceMotion) {
@@ -78,7 +78,7 @@ export class Player {
         this.stepAcc = 0;
         const kind = this.crouched ? 'crouch' : this.sprinting ? 'sprint' : 'walk';
         sounds.step(kind);
-        noise(this.x, this.z, kind === 'crouch' ? NOISE.crouchStep : kind === 'sprint' ? NOISE.sprintStep : NOISE.step, false);
+        noise(this.x, this.z, kind === 'crouch' ? NOISE.crouchStep : kind === 'sprint' ? NOISE.sprintStep : NOISE.step, false, 'step');
       }
     } else this.still += dt;
 

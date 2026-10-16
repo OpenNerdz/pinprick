@@ -87,9 +87,9 @@ export class Hud {
     this.toggle('ret', E.reticle, 'hot', sc.overheated);
 
 
-    // red edges when it is close
-    const fear = s.fearNow || 0;
-    this.set('vig', E.vignette, 'opacity', (Math.round(fear * 20) / 20 * 0.9).toFixed(2));
+    // red edges when it is close, and a flash of red when its sonar washes over you
+    const fear = Math.max(s.fearNow || 0, (s.fx.ping || 0) * 1.1);
+    this.set('vig', E.vignette, 'opacity', (Math.round(Math.min(1, fear) * 20) / 20 * 0.9).toFixed(2));
     this.set('black', E.blackout, 'opacity', String(s.fx.black));
   }
 }
