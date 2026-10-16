@@ -31,6 +31,7 @@ export class Session {
     this.def = def;
     this.diff = DIFFICULTY[opts.difficulty] || DIFFICULTY.normal;
     this.renderer = opts.renderer; this.sounds = opts.sounds; this.ui = opts.ui;
+    this.sounds.setPlace(def.id); // drips in the cistern, creaking steel in the shaft
     this.reduceMotion = !!opts.reduceMotion;
     this.demo = !!opts.demo;
     this.seed = opts.seed ?? (Math.random() * 1e9) >>> 0;

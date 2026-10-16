@@ -45,6 +45,24 @@ each gets caught.
 The scanner in your hand is a real 3D model: every dot leaves its emitter, the coils light as it
 charges, the fins glow as it heats, and the screen on its back shows charge, heat and sweep.
 
+**Sound.** Everything is synthesised from physical models when the game starts, a few variants of
+each, so nothing repeats exactly:
+- **The scanner:** its motor spins up with the charge and winds down after you let go, over a fine
+  fizz of dots landing.
+- **Footsteps and impacts:** your boots crunch grit on concrete, doors and pipes ring like steel.
+- **The creature:** its voice is a model of a throat, so it groans and breaks into a creak, its clicks
+  are wet, and its breath rattles in and out.
+- **The tunnels:** the background is the low hum of rock and moving air, with now and then a drip, a
+  creak of steel or a stone falling somewhere off in the dark, more drips in the cistern and more
+  creaking in the shaft.
+- **3D:** the creature and the tunnels are placed around your head (best with headphones), so a sound
+  behind you is behind you.
+- **Inside your head:** your devices beep through their own tinny speaker; your heart and, when it is
+  close, your own shaking breath are there too.
+
+`node tools/audition.mjs` renders scenes through the real sound code to `.tmp/audio`, as WAV and MP3,
+with their loudness; `node tools/audition.mjs dry` renders every sound on its own.
+
 **The motion tracker** (Q or middle click; TRACK on touch) is held in your other hand, on the left
 (the right when left-handed; on touch screens it sits higher, clear of the thumbstick). You find it in
 Intake, and you can scan and sweep while it is up. Once a second it ticks and a wave sweeps across its screen. Anything that moved within reach
@@ -76,7 +94,7 @@ Using it costs you, too:
 npm test            # just the tests
 ```
 
-Everything is plain ES modules bundled by esbuild into one HTML file of about 170 KB with the fonts
+Everything is plain ES modules bundled by esbuild into one HTML file of about 230 KB with the fonts
 embedded, so it works offline. There is no framework and no runtime dependency.
 
 On GitHub, `.github/workflows/pages.yml` runs the tests and the build on every pull request, and on
@@ -121,7 +139,12 @@ src/
     gun.js         its shader: key and rim light, emitter glow, glowing coils, fins and screen
     trackermesh.js, tracker.js   the motion tracker's geometry, and its screen drawn in the shader
     meshkit.js     box / cylinder / extrusion helpers both devices are built from
-  audio/           Web Audio engine (buses, voice cap) and the synthesised sound vocabulary
+  audio/           every sound is synthesised; there are no audio files
+    dsp.js         sample-level models: filters, ringing modes, grit, friction, a throat
+    recipes.js     how each sound is made from them (a boot on concrete, wet clicks, a steel door...)
+    bank.js        renders the recipes into buffers at start-up, several variants of each
+    engine.js      Web Audio: buses, the cave's reverb, the devices' small speaker, 3D placement
+    sounds.js      the vocabulary the game calls: where each sound plays from and how loud
   ui/              input (touch/mouse/keys -> intent), HUD, settings, haptics
   levels/          one file per level + index.js for the order
 test/              node:test suites (no browser needed)
