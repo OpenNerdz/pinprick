@@ -25,19 +25,28 @@ export class Sounds {
   start() {
     if (!this.ok || this.hum) return;
     const c = this.e.ctx, e = this.e;
-    // scanner purr: two voices a fifth apart with a tremolo that speeds up as it spins up
-    const o1 = c.createOscillator(); o1.type = 'triangle'; o1.frequency.value = 140;
-    const o2 = c.createOscillator(); o2.type = 'sine'; o2.frequency.value = 210;
-    const g2 = c.createGain(); g2.gain.value = 0.5;
-    const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 500; f.Q.value = 2;
-    const trem = c.createGain(); trem.gain.value = 0.62;
-    const lfo = c.createOscillator(); lfo.frequency.value = 11;
-    const lg = c.createGain(); lg.gain.value = 0.38;
+    // the scanner firing: a rain of tiny ticks, one for each dot as it lands, thickening and brightening
+    // as it spins up, over a faint motor and a breath of air. A loop of randomly spaced clicks played
+    // faster is more ticks a second.
+    const sr = c.sampleRate, len = Math.floor(sr * 1.5), dotBuf = c.createBuffer(1, len, sr), d = dotBuf.getChannelData(0);
+    for (let n = 0; n < 150; n++) {
+      const at = Math.floor(Math.random() * (len - 200)), amp = 0.25 + Math.random() * 0.75, w = 40 + Math.random() * 110;
+      const f0 = (1800 + Math.random() * 3500) / sr * Math.PI * 2;
+      for (let i = 0; i < w; i++) d[at + i] += Math.sin(i * f0) * amp * Math.exp(-i / (w * 0.25)); // a glassy pinprick
+    }
+    const rain = c.createBufferSource(); rain.buffer = dotBuf; rain.loop = true;
+    const rbp = c.createBiquadFilter(); rbp.type = 'bandpass'; rbp.frequency.value = 2600; rbp.Q.value = 0.7;
+    const motor = c.createOscillator(); motor.frequency.value = 95;
+    const mg = c.createGain(); mg.gain.value = 0.22;
+    const hiss = c.createBufferSource(); hiss.buffer = e.noiseBuf; hiss.loop = true;
+    const hhp = c.createBiquadFilter(); hhp.type = 'highpass'; hhp.frequency.value = 5200;
+    const hg = c.createGain(); hg.gain.value = 0.12;
     const out = c.createGain(); out.gain.value = 0;
-    o1.connect(f); o2.connect(g2); g2.connect(f); f.connect(trem); lfo.connect(lg); lg.connect(trem.gain);
-    trem.connect(out); out.connect(e.sfx); out.connect(e.echo);
-    o1.start(); o2.start(); lfo.start();
-    this.hum = {o1, o2, f, lfo, out};
+    const wet = c.createGain(); wet.gain.value = 0.35; // only a little of it in the cave's echo
+    rain.connect(rbp); rbp.connect(out); motor.connect(mg); mg.connect(out); hiss.connect(hhp); hhp.connect(hg); hg.connect(out);
+    out.connect(e.sfx); out.connect(wet); wet.connect(e.echo);
+    rain.start(); motor.start(); hiss.start();
+    this.hum = {rain, rbp, motor, out};
 
     // the creature's breath: a slow wet swell with a rattle in it, muffled by distance and rock
     const bs = c.createBufferSource(); bs.buffer = e.noiseBuf; bs.loop = true;
@@ -132,14 +141,14 @@ export class Sounds {
   updateHum(firing, charge, heat, interference = 0) {
     if (!this.hum) return;
     const h = this.hum, t = this.e.now;
-    const wobble = (heat > 0.8 ? (heat - 0.8) * 60 : 0) + interference * (Math.random() - 0.5) * 120;
-    h.out.gain.setTargetAtTime(firing ? 0.03 + 0.03 * charge : 0, t, firing ? 0.04 : 0.09);
-    h.o1.frequency.setTargetAtTime(140 + 250 * charge - wobble, t, 0.06);
-    h.o2.frequency.setTargetAtTime((140 + 250 * charge) * 1.5 + wobble, t, 0.06);
-    h.f.frequency.setTargetAtTime(480 + 1700 * charge, t, 0.06);
-    h.lfo.frequency.setTargetAtTime(11 + 33 * charge + interference * 20, t, 0.06);
+    // hot, the motor strains; near the creature, the rain stutters and smears
+    const strain = heat > 0.8 ? (heat - 0.8) * 120 : 0, jam = interference * (Math.random() - 0.5);
+    h.out.gain.setTargetAtTime(firing ? 0.02 + 0.016 * charge : 0, t, firing ? 0.05 : 0.1);
+    h.rain.playbackRate.setTargetAtTime(Math.max(0.2, 0.6 + 1.7 * charge + jam * 1.4), t, 0.05);
+    h.rbp.frequency.setTargetAtTime(2000 + 2800 * charge + jam * 1500, t, 0.06);
+    h.motor.frequency.setTargetAtTime(90 + 70 * charge + strain * (Math.random() - 0.3), t, 0.06);
   }
-  trigger() { this.e.tone(330, 0.025, 0.07, {echo: false}); }
+  trigger() { this.e.noise(0.018, 0.012, {filter: 'highpass', freq: 3000, echo: false}); this.e.tone(330, 0.012, 0.05, {echo: false}); }
   coreBell() { this.e.tone(1318.5, 0.035, 0.8); this.e.tone(1975.5, 0.015, 0.6, {at: 0.04}); }
   heatWarn() { this.e.tone(1760, 0.012, 0.05, {type: 'square', echo: false}); }
   overheat() {
@@ -331,9 +340,14 @@ export class Sounds {
     this.e.tone(320 + Math.random() * 180, p.g * 0.6, 0.03, {at, pan: p.pan, echo: false});
   }
   /** Echolocation: a burst of clicks that speeds up, ending in a creak from its throat. */
-  clicks(x, z, muffle, intense = false) {
+  clicks(x, z, muffle, intense = false) { // intense: true, a long sonar burst; 'short', a hunt's quick one
     const p = this.at(x, z, muffle, intense ? 0.09 : 0.06);
     if (p.g < 0.003) return;
+    if (intense === 'short') {
+      let t = 0;
+      for (let i = 0; i < 5 + Math.floor(Math.random() * 3); i++) { this.clickAt(p, t, 0.6 + Math.random() * 0.4); t += 0.045 + Math.random() * 0.02; }
+      return;
+    }
     const n = intense ? 14 + Math.floor(Math.random() * 8) : 5 + Math.floor(Math.random() * 5);
     let t = 0, gap = intense ? 0.07 : 0.17;
     for (let i = 0; i < n; i++) { this.clickAt(p, t, Math.random()); t += gap * (0.8 + Math.random() * 0.4); gap *= intense ? 0.97 : 0.86; }

@@ -53,7 +53,8 @@ export const DOTS = {capacity: 100000, life: 20};
 
 export const STALKER = {
   patrol: 1.3, investigate: 2.4, hunt: 3.45, finale: 3.0,
-  lunge: 1.9, lungeDist: 3.2,    // the last few metres of a hunt come at you this much faster
+  dash: 5.5,                     // hunting it runs in dashes, faster than you can sprint, then stops to click
+  lunge: 1.9, lungeDist: 3.2,    // the last few metres of the final chase come at you this much faster
   catchDist: 0.85, catchCrawl: 1.15, // on all fours its head reaches further ahead of its body
   stumble: 1.0,                  // after a lunge that misses, it stumbles at half speed this long
   lightWindow: 1.2,              // scanner hits on its body add up over about this many seconds
@@ -87,7 +88,9 @@ export const STALKER = {
  * Difficulty presets. Each value multiplies or replaces the base number it names. The creature's wits:
  *   lightHold     seconds the beam must stay on its body before it knows where the light comes from
  *   alertTime     how long it freezes, turning toward you, before it charges
- *   lungeMax      how long its final lunge lasts before it stumbles
+ *   lungeMax      how long its lunge at the end of the final chase lasts before it stumbles
+ *   dashTime      seconds each dash of a hunt lasts; huntWarn, seconds from its click to the echo that
+ *                 finds you if you move; huntCycles, clicks in a row that find nothing before it searches
  *   listen        hearing multiplier while it stands still listening (you hear it clicking)
  *   predict       0..1, how far it reads ahead along the way you were heading when it loses you
  *   searchPoints  spots it checks around where it lost you; searchRadius, how far around
@@ -117,28 +120,31 @@ export const DIFFICULTY = {
   easy: {
     label: 'Easy', blurb: 'Signal reads while you move. It hears less, reacts slower and gives up sooner.',
     hearing: 0.7, speed: 0.85, heat: 0.75, dotLife: 24, signalStill: 0, tintFlesh: true, staticRange: 10,
+    dashTime: 0.9, huntWarn: 0.7, huntCycles: 2,
     lightHold: 1.2, alertTime: 1.15, lungeMax: 1.0, listen: 1, predict: 0, searchPoints: 1, searchRadius: 5, ambush: false, bumpGrace: true,
     sonar: 7, sonarWarn: 1.2, sonarCrouch: true, burn: 1.5, burnLearn: 0, stalk: 0.2, stalkClose: 0.12, hints: true,
     finaleGuess: 2.5, finaleJitter: 0.2, finaleNear: 6,
-    trkRange: 26, trkBattery: 80, trkStart: 0.8, trkRefill: 0.5, trkCells: 1, trkNoise: 2.5,
+    trkRange: 26, trkBattery: 110, trkStart: 0.8, trkRefill: 0.5, trkCells: 1, trkNoise: 2.5,
     trkFreeze: 0, trkListen: 0.3, trkNotice: 0, trkBehind: true, trkJitter: 0.3, trkFade: 2.4,
   },
   normal: {
     label: 'Normal', blurb: 'Stand still to read the signal. It hunts by sound and searches where it lost you.',
     hearing: 1, speed: 1, heat: 1, dotLife: 20, signalStill: 0.5, tintFlesh: false, staticRange: 10,
+    dashTime: 1.0, huntWarn: 0.55, huntCycles: 3,
     lightHold: 0.7, alertTime: 0.85, lungeMax: 1.2, listen: 1.3, predict: 0.6, searchPoints: 3, searchRadius: 7, ambush: true,
     sonar: 10, sonarWarn: 0.9, sonarCrouch: false, burn: 2.5, burnLearn: 1, stalk: 0.45, stalkClose: 0.25, hints: true,
     finaleGuess: 1.5, finaleJitter: 0.12, finaleNear: 8,
-    trkRange: 20, trkBattery: 50, trkStart: 0.5, trkRefill: 0.4, trkCells: 0.75, trkNoise: 3.5,
+    trkRange: 20, trkBattery: 72, trkStart: 0.5, trkRefill: 0.4, trkCells: 0.75, trkNoise: 3.5,
     trkFreeze: 0.3, trkListen: 0.3, trkNotice: 4, trkBehind: true, trkJitter: 0.6, trkFade: 2.0,
   },
   hard: {
     label: 'Hard', blurb: 'Dots fade faster and the signal settles slower. It reacts fast, listens hard and cuts you off.',
     hearing: 1.25, speed: 1.1, heat: 1.2, dotLife: 14, signalStill: 1.2, tintFlesh: false, staticRange: 14,
+    dashTime: 1.0, huntWarn: 0.5, huntCycles: 3,
     lightHold: 0.45, alertTime: 0.6, lungeMax: 1.5, listen: 1.6, predict: 1, searchPoints: 5, searchRadius: 9, ambush: true,
     sonar: 13, sonarWarn: 0.65, sonarCrouch: false, burn: 3.5, burnLearn: 1, stalk: 0.7, stalkClose: 0.35, hints: false,
     finaleGuess: 1, finaleJitter: 0.06, finaleNear: 12,
-    trkRange: 16, trkBattery: 40, trkStart: 0.35, trkRefill: 0.35, trkCells: 0.5, trkNoise: 4.5,
+    trkRange: 16, trkBattery: 56, trkStart: 0.35, trkRefill: 0.35, trkCells: 0.5, trkNoise: 4.5,
     trkFreeze: 0.55, trkListen: 0.25, trkNotice: 3, trkBehind: false, trkJitter: 1.0, trkFade: 1.3,
   },
 };

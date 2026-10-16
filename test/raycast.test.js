@@ -2,8 +2,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {World, Actor} from '../src/world/world.js';
-import {box, cyl, sph} from '../src/world/shapes.js';
-import {cast, hit, rayPrim} from '../src/world/raycast.js';
+import {box, cyl, sph, cap} from '../src/world/shapes.js';
+import {cast, hit, rayPrim, lastNormal} from '../src/world/raycast.js';
 import {CELL, MAT} from '../src/config.js';
 import {rng} from '../src/util/math.js';
 
@@ -46,14 +46,15 @@ function bruteCast(world, ox, oy, oz, dx, dy, dz, maxT) {
 function makeWorld(seed) {
   const r = rng(seed), w = new World(MAP);
   for (let i = 0; i < 60; i++) {
-    const x = 2.2 + r() * 19.6, z = 2.2 + r() * 9.6, k = Math.floor(r() * 3);
+    const x = 2.2 + r() * 19.6, z = 2.2 + r() * 9.6, k = Math.floor(r() * 4);
     if (k === 0) w.add(box(x, z, x + 0.2 + r() * 3, z + 0.2 + r() * 2, r() * 2, 0.5 + r() * 4));
     else if (k === 1) w.add(cyl(x, z, 0.1 + r() * 0.8, r() * 1.5, 1 + r() * 4));
-    else w.add(sph(x, r() * 4, z, 0.1 + r() * 1.2));
+    else if (k === 2) w.add(sph(x, r() * 4, z, 0.1 + r() * 1.2));
+    else w.add(cap(x, r() * 3, z, x + (r() - 0.5) * 3, r() * 3, z + (r() - 0.5) * 3, 0.05 + r() * 0.5));
   }
   w.props[3].on = false;
   w.index();
-  const a = new Actor([cyl(0, 0, 0.2, 0, 1.8), sph(0, 2.0, -0.05, 0.18)], {radius: 0.45});
+  const a = new Actor([cyl(0, 0, 0.2, 0, 1.8), sph(0, 2.0, -0.05, 0.18), cap(0.2, 1.6, 0, 0.7, 1.1, -0.4, 0.06)], {radius: 0.95});
   a.place(9, 3, 0.4);
   w.actors.push(a);
   return w;
@@ -76,6 +77,21 @@ test('indexed cast matches brute force on 20k random rays', () => {
     if (ok) hits++;
   }
   assert.ok(hits > 19000);
+});
+
+test('capsules: the side, the round ends, a slanted one, a miss, and a ray down the axis', () => {
+  const close = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-9, `${what}: ${a} vs ${b}`);
+  const n = (...want) => lastNormal().forEach((v, i) => close(v, want[i], 'normal ' + i));
+  const up = cap(0, 0, 0, 0, 2, 0, 0.5);
+  close(rayPrim(up, -3, 1, 0, 1, 0, 0, 99), 2.5, 'side'); n(-1, 0, 0);
+  close(rayPrim(up, 0, 5, 0, 0, -1, 0, 99), 2.5, 'down the axis onto the top'); n(0, 1, 0);
+  close(rayPrim(up, -3, 2.3, 0, 1, 0, 0, 99), 2.6, 'the round top'); n(-0.8, 0.6, 0);
+  close(rayPrim(up, -3, -0.3, 0, 1, 0, 0, 99), 2.6, 'the round bottom'); n(-0.8, -0.6, 0);
+  assert.equal(rayPrim(up, -3, 3, 0, 1, 0, 0, 99), -1, 'over the top');
+  assert.equal(rayPrim(up, -3, 1, 0, 1, 0, 0, 2), -1, 'beyond best');
+  const slant = cap(0, 0, 0, 2, 2, 0, 0.3);
+  close(rayPrim(slant, 1, 1, -3, 0, 0, 1, 99), 2.7, 'slanted'); n(0, 0, -1);
+  assert.equal(rayPrim(slant, 3, 0, -3, 0, 0, 1, 99), -1, 'past its side');
 });
 
 test('actor hits are reported with the actor', () => {

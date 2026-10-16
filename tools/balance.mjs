@@ -61,7 +61,8 @@ if (on('lunge')) for (const diff of DIFFS) {
   row('noticed at 4 m, sprinting the moment it freezes', diff, [pct(c, N)]);
 }
 
-if (on('escape')) for (const plan of ['freeze', 'sneak', 'hide']) for (const diff of DIFFS) row(`hunted from 9 m, run 5 s, then ${plan}`, diff, rate(8, (def, k) => {
+// 'rhythm' sneaks only while it dashes and freezes while it clicks: what the game teaches
+if (on('escape')) for (const plan of ['freeze', 'sneak', 'rhythm', 'hide']) for (const diff of DIFFS) row(`hunted from 9 m, run 5 s, then ${plan}`, diff, rate(8, (def, k) => {
   const s = make(def, 900 + k, diff), st = s.stalker, p = s.player;
   [p.x, p.z] = openSpot(s, rng(k * 3 + 11)); st.wake(p);
   const f = s.nav.field(p.x, p.z);
@@ -78,6 +79,11 @@ if (on('escape')) for (const plan of ['freeze', 'sneak', 'hide']) for (const dif
     if (plan === 'hide') { memo.sneak = !run; if (!there) steer(s, it, gx, gz, memo); else if (!p.crouched) it.crouch = true; it.sprint = run; }
     else if (run) { steer(s, it, gx, gz, memo); it.sprint = true; }
     else if (plan === 'sneak' && !there) { memo.sneak = true; steer(s, it, gx, gz, memo); }
+    else if (plan === 'rhythm' && !there) {
+      memo.sneak = true;
+      const listening = st.pulseIn >= 0 || (st.state === 'hunt' && st.burst === 'click') || st.state === 'listen' || st.state === 'search';
+      if (!listening) steer(s, it, gx, gz, memo); else if (!p.crouched) it.crouch = true;
+    }
     return it;
   });
   return s.state !== 'play';

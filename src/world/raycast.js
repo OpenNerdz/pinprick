@@ -55,10 +55,43 @@ export function raySph(p, ox, oy, oz, dx, dy, dz, best) {
   return tt;
 }
 
+/** Nearest positive hit of a unit ray on a sphere, or -1 (no normal). */
+function sphT(cx, cy, cz, r, ox, oy, oz, dx, dy, dz) {
+  const lx = ox - cx, ly = oy - cy, lz = oz - cz;
+  const b = lx * dx + ly * dy + lz * dz, disc = b * b - (lx * lx + ly * ly + lz * lz - r * r);
+  return disc < 0 ? -1 : -b - Math.sqrt(disc);
+}
+
+/** Capsule: the infinite tube first; if that hit lies past either end, the round end it strikes. */
+export function rayCap(p, ox, oy, oz, dx, dy, dz, best) {
+  const bax = p.bx - p.ax, bay = p.by - p.ay, baz = p.bz - p.az, r = p.r;
+  const oax = ox - p.ax, oay = oy - p.ay, oaz = oz - p.az;
+  const baba = bax * bax + bay * bay + baz * baz, bard = bax * dx + bay * dy + baz * dz, baoa = bax * oax + bay * oay + baz * oaz;
+  const a = baba - bard * bard;
+  let tt;
+  if (a > 1e-9) {
+    const rdoa = dx * oax + dy * oay + dz * oaz, oaoa = oax * oax + oay * oay + oaz * oaz;
+    const b = baba * rdoa - baoa * bard, c = baba * oaoa - baoa * baoa - r * r * baba, h = b * b - a * c;
+    if (h < 0) return -1;
+    tt = (-b - Math.sqrt(h)) / a;
+    const y = baoa + tt * bard;
+    if (!(y > 0 && y < baba)) tt = y <= 0 ? sphT(p.ax, p.ay, p.az, r, ox, oy, oz, dx, dy, dz) : sphT(p.bx, p.by, p.bz, r, ox, oy, oz, dx, dy, dz);
+  } else { // along the axis (or no length at all): only the ends can be hit
+    const t1 = sphT(p.ax, p.ay, p.az, r, ox, oy, oz, dx, dy, dz), t2 = sphT(p.bx, p.by, p.bz, r, ox, oy, oz, dx, dy, dz);
+    tt = t1 > 0 && (t2 <= 0 || t1 < t2) ? t1 : t2;
+  }
+  if (!(tt > 0 && tt < best)) return -1;
+  const hx = ox + dx * tt - p.ax, hy = oy + dy * tt - p.ay, hz = oz + dz * tt - p.az;
+  const k = baba > 0 ? Math.max(0, Math.min(1, (hx * bax + hy * bay + hz * baz) / baba)) : 0;
+  tnx = (hx - k * bax) / r; tny = (hy - k * bay) / r; tnz = (hz - k * baz) / r;
+  return tt;
+}
+
 export function rayPrim(p, ox, oy, oz, dx, dy, dz, best) {
   return p.k === 0 ? rayBox(p, ox, oy, oz, dx, dy, dz, best)
     : p.k === 1 ? rayCyl(p, ox, oy, oz, dx, dy, dz, best)
-    : raySph(p, ox, oy, oz, dx, dy, dz, best);
+    : p.k === 2 ? raySph(p, ox, oy, oz, dx, dy, dz, best)
+    : rayCap(p, ox, oy, oz, dx, dy, dz, best);
 }
 
 /** Last normal produced by a primitive test (for tests and tools). */
@@ -99,9 +132,7 @@ export function cast(world, ox, oy, oz, dx, dy, dz, maxT, withActors = true) {
       stamp[pi] = id;
       const p = props[pi];
       if (!p.on) continue;
-      const tt = p.k === 0 ? rayBox(p, ox, oy, oz, dx, dy, dz, best)
-        : p.k === 1 ? rayCyl(p, ox, oy, oz, dx, dy, dz, best)
-        : raySph(p, ox, oy, oz, dx, dy, dz, best);
+      const tt = rayPrim(p, ox, oy, oz, dx, dy, dz, best);
       if (tt > 0 && tt < best) { best = tt; nx = tnx; ny = tny; nz = tnz; m = p.m; }
     }
     // ceiling or floor inside this cell
@@ -126,9 +157,7 @@ export function cast(world, ox, oy, oz, dx, dy, dz, maxT, withActors = true) {
       const parts = A.parts;
       for (let k = 0; k < parts.length; k++) {
         const p = parts[k];
-        const tt = p.k === 0 ? rayBox(p, ox, oy, oz, dx, dy, dz, best)
-          : p.k === 1 ? rayCyl(p, ox, oy, oz, dx, dy, dz, best)
-          : raySph(p, ox, oy, oz, dx, dy, dz, best);
+        const tt = rayPrim(p, ox, oy, oz, dx, dy, dz, best);
         if (tt > 0 && tt < best) { best = tt; nx = tnx; ny = tny; nz = tnz; m = p.m; actor = A; }
       }
     }

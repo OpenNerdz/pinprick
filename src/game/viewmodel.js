@@ -10,8 +10,8 @@
 //
 // The motion tracker has its own pose in your other hand, on the other side of the view from the
 // scanner: it comes up from below with a little overshoot, faces you (sized to the screen, so it reads
-// on a phone, and on touch screens held higher so the thumb on the stick does not cover it), nods with
-// each pulse, shakes when something is right on top of you, and falls when you are caught. A dead one
+// on a phone, and on touch screens held higher so the thumb on the stick does not cover it), holds
+// steady while it ticks, shakes when something is right on top of you, and falls when you are caught. A dead one
 // lifts a little when you try it, and drops again.
 
 import {mat4, identity, translate, rotateX, rotateY, rotateZ, scale, transformPoint} from '../util/mat4.js';
@@ -122,8 +122,8 @@ export class ViewModel {
     const jx = (Math.random() - 0.5) * shake, jy = (Math.random() - 0.5) * shake;
     let x = bx + Math.cos(b) * 0.008 * m * calm + jx - 0.05 * down - 0.4 * this.lagYaw * -zz;
     let y = by - Math.abs(Math.sin(b)) * 0.01 * m * calm + Math.sin(T * 1.2 + 1) * 0.002 * calm + jy
-      - 0.3 * down - 0.5 * this.drop + 0.004 * tr.glow * calm + 0.01 * p.crouchT;
-    const z = zz + 0.003 * tr.glow;
+      - 0.3 * down - 0.5 * this.drop + 0.01 * p.crouchT;
+    const z = zz;
     // facing you straight on wherever it sits, tipped back a touch as if held up to read
     let yaw = Math.atan2(-bx, -zz) + 0.5 * this.lagYaw - 0.25 * down;
     let pitch = Math.atan2(by, -zz) + 0.08 + 0.6 * this.lagPitch - 0.9 * down - 1.0 * this.drop;

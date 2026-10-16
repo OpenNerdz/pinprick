@@ -81,7 +81,7 @@ export class Actor {
     this.hits = 0;
   }
 
-  /** Move the actor. `lift` raises it (a figure standing on a pedestal). Boxes do not rotate. */
+  /** Move the actor. `lift` raises it (a figure standing on a pedestal). Boxes do not rotate; capsules turn both ends. */
   place(x, z, face = this.face, lift = this.lift) {
     this.x = x; this.z = z; this.face = face; this.lift = lift;
     const s = Math.sin(face), c = Math.cos(face);
@@ -93,6 +93,12 @@ export class Actor {
         continue;
       }
       // local +x is the actor's right, local -z its forward; rotate by its facing
+      if (l.k === 3) { // a capsule: both ends
+        p.ax = x + l.ax * c - l.az * s; p.az = z + l.ax * s + l.az * c; p.ay = l.ay + lift;
+        p.bx = x + l.bx * c - l.bz * s; p.bz = z + l.bx * s + l.bz * c; p.by = l.by + lift;
+        p.x = (p.ax + p.bx) / 2; p.z = (p.az + p.bz) / 2; p.r = l.r;
+        continue;
+      }
       p.x = x + l.x * c - l.z * s; p.z = z + l.x * s + l.z * c; p.r = l.r;
       if (l.k === 1) { p.y0 = l.y0 + lift; p.y1 = l.y1 + lift; } else p.y = l.y + lift;
     }

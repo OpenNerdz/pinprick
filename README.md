@@ -7,13 +7,25 @@ it hears the scanner, your footsteps and the sweep.
 Four levels: **Intake** (tutorial, nothing hunting you), **Sublevel** (the original map, the creature
 wakes when you take the first core), **Cistern** and **Lift Shaft**.
 
-The creature groans, drags a foot and breathes with a rattle; it copies sounds it has heard you make.
-It only knows what it hears or feels: keep still with the scanner off and it stops beside you to
-listen, then goes another way. Once it has hunted you, though, it searches where it lost you, and then
-only a hiding spot is safe. Three things make it this game's monster:
+The creature is built for listening. It has no eyes, just a long smooth skull with four flaps folded
+back along it, which fan open round its mouth like a dish when it listens or clicks. Its neck is too
+long, its spine is knobbly, a few ribs show over a hollow chest, its arms are far too long with three
+splayed fingers, and its legs bend backwards. It is built from capsules on a jointed skeleton, so it
+walks, gallops on all fours, cocks its head, shields its face from your light and rears over you.
 
-- **It has a scanner too.** When it listens it clicks, and a moment later the echo splashes red dots
-  over everything around it. Whatever moves inside that red, it finds. Freeze on the first click.
+It groans, drags a foot and breathes with a rattle, and it copies sounds it has heard you make. It only
+knows what it hears or feels: keep still with the scanner off and it stops beside you to listen, then
+goes another way. Once it has hunted you, though, it searches where it lost you, and then only a hiding
+spot is safe. Three things make it this game's monster:
+
+- **It has a scanner too, and it hunts with it.** When it listens it clicks, and a moment later the
+  echo splashes red dots over everything around it. Whatever moves inside that red, it finds. Freeze
+  on the first click.
+  - **When it hunts, it moves in bursts.** It dashes on all fours toward where it last placed you,
+    faster than you can sprint, then stops dead with its ear open and clicks. **Move while it runs,
+    freeze when it clicks.**
+  - **It gives up when its clicks come back empty:** a few empty clicks in a row, or a single one
+    right where it thought you were, and it searches instead.
 - **Light stops it.** Keep your beam on it (a glance is safe) and it knows where you are, but it cannot
   come on: it rears up in the light, and if you hold it there it shrieks and runs to the far side of
   the level. It gets used to the light, though, so each time it takes longer to break (on Hard soon
@@ -22,7 +34,8 @@ only a hiding spot is safe. Three things make it this game's monster:
   stepping only when you step, so your steps sound doubled. Each step it closes in, and at arm's length
   it pounces. Stand still until it gives up the trail, or turn and touch it with the beam, and it bolts.
 
-Difficulty changes its wits as well as its ears: how fast it reacts, how far its sonar reaches and how
+Difficulty changes its wits as well as its ears: how fast it reacts, how long its hunting dashes run
+and how much warning its clicks give, how many empty clicks it takes to give up, how far its sonar reaches and how
 long the clicks warn you, how long the light takes to break it, how often and how fast it stalks, whether it
 reads which way you ran, how long it searches, and whether it goes round to wait at the far end of a
 crawl. After you are caught it keeps away from where you come back for a while. `node

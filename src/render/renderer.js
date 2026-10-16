@@ -53,6 +53,23 @@ export function primMesh(v, p, seg = 14) {
       v.push(p.x, p.y1, p.z, ax, p.y1, az, bx, p.y1, bz);
       if (p.y0 > 0) v.push(p.x, p.y0, p.z, ax, p.y0, az, bx, p.y0, bz);
     }
+  } else if (p.k === 3) { // capsule: a tube with a little cone at each end standing in for the round caps
+    const n = Math.max(6, seg >> 1);
+    let ex = p.bx - p.ax, ey = p.by - p.ay, ez = p.bz - p.az;
+    const len = Math.hypot(ex, ey, ez) || 1; ex /= len; ey /= len; ez /= len;
+    // two directions square to the axis
+    let ux = -ez, uy = 0, uz = ex;
+    if (Math.abs(ey) > 0.9) { ux = 1; uy = 0; uz = 0; }
+    const ul = Math.hypot(ux, uy, uz) || 1; ux /= ul; uy /= ul; uz /= ul;
+    const wx = ey * uz - ez * uy, wy = ez * ux - ex * uz, wz = ex * uy - ey * ux;
+    const ring = (cx, cy, cz, j) => { const a = j / n * 6.2832, c = Math.cos(a) * p.r, s = Math.sin(a) * p.r;
+      return [cx + ux * c + wx * s, cy + uy * c + wy * s, cz + uz * c + wz * s]; };
+    const ta = [p.ax - ex * p.r, p.ay - ey * p.r, p.az - ez * p.r], tb = [p.bx + ex * p.r, p.by + ey * p.r, p.bz + ez * p.r];
+    for (let j = 0; j < n; j++) {
+      const a0 = ring(p.ax, p.ay, p.az, j), a1 = ring(p.ax, p.ay, p.az, j + 1), b0 = ring(p.bx, p.by, p.bz, j), b1 = ring(p.bx, p.by, p.bz, j + 1);
+      quad(...a0, ...a1, ...b1, ...b0);
+      v.push(...ta, ...a1, ...a0, ...tb, ...b0, ...b1);
+    }
   } else {
     const LA = Math.max(4, (seg >> 1) + 1), LO = seg;
     const pt = (i, j) => {

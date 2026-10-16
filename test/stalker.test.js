@@ -85,7 +85,7 @@ test('it never camps the mouth of a crawl it cannot get into', () => {
   st.wake(); st.x = 7; st.z = 13.6; st.notice(7, 10, 0); st.enter('hunt', 0);
   run(s, 0, 40);
   assert.equal(s.state, 'play');
-  assert.ok(st.calm, `still ${st.state} after 40 s`);
+  assert.ok(st.calm || st.state === 'stalk', `still ${st.state} after 40 s`); // given up the hunt, either way
   // from here on it goes about its patrol: it does not stand at either end of the crawl
   let atMouth = 0;
   run(s, 40, 20, () => { if (Math.min(Math.hypot(st.x - 7, st.z - 12.5), Math.hypot(st.x - 7, st.z - 7.5)) < 2) atMouth += dt; return intent(); });
@@ -126,6 +126,44 @@ test('after a chase it searches the area: on Hard, freezing in the open where it
   st.sinceFix = 0;
   run(s, 0.4, 30);
   assert.equal(s.state, 'caught', `it searched and found you (state ${st.state})`);
+});
+
+test('it hunts in bursts: a dash faster than you can sprint, then it stops dead and clicks', () => {
+  const {s} = make(LEVELS[2]), st = s.stalker, p = s.player;
+  p.x = 29; p.z = 3; st.wake(); st.x = 13; st.z = 3; st.fix(p.x, p.z, 0); st.enter('hunt', 0);
+  let t = 0, dashFrom = st.x, dashFor = 0, fastest = 0, clicks = 0, prev = st.burst;
+  for (; t < 3; t += dt) {
+    run(s, t, dt);
+    if (st.burst === 'dash') dashFor += dt;
+    if (st.burst !== prev) { if (st.burst === 'click') { clicks++; fastest = Math.max(fastest, (st.x - dashFrom) / dashFor); } else { dashFrom = st.x; dashFor = 0; } prev = st.burst; }
+  }
+  assert.ok(clicks >= 1, `${clicks} clicks`);
+  assert.ok(fastest > 5.2, `dashed at ${fastest.toFixed(1)} m/s`);
+});
+
+test('in a hunt, moving through its click gives you away; keeping still through it does not', () => {
+  for (const move of [true, false]) {
+    const {s} = make(LEVELS[2]), st = s.stalker, p = s.player;
+    p.x = 20; p.z = 3; st.wake(); st.x = 26; st.z = 3; st.hear = noop; st.fix(29, 3, 0); st.enter('hunt', 0);
+    st.burstT = 0; // it is about to stop and click, 6 m from you, and it thinks you are behind it
+    let t = run(s, 0, 2 * dt);
+    assert.equal(st.burst, 'click');
+    const fix0 = st.fixT;
+    run(s, t, 1, () => { const it = intent(); if (move) it.moveX = 0.4; return it; });
+    assert.equal(st.fixT > fix0, move, move ? 'moving: found' : 'still: not found');
+  }
+});
+
+test('clicks that find nothing end the chase: a few in a row, or one right where it last placed you', () => {
+  // [where it thinks you are, empty clicks before it searches]: far off, it keeps dashing; there, it searches at once
+  for (const [lx, lz, want] of [[40, 5, 3], [20, 3, 1]]) {
+    const {s} = make(LEVELS[2], 'hard'), st = s.stalker, p = s.player;
+    p.x = 44; p.z = 36; st.wake(); st.x = 13; st.z = 3; st.hear = noop; st.fix(lx, lz, 0); st.enter('hunt', 0);
+    let t = 0, clicks = 0, prev = st.burst;
+    for (; t < 20 && st.state === 'hunt'; t += dt) { run(s, t, dt); if (st.burst === 'click' && prev !== 'click') clicks++; prev = st.burst; }
+    assert.equal(st.state, 'search');
+    assert.equal(clicks, want, `${clicks} empty clicks with you thought at ${lx},${lz}`);
+  }
 });
 
 test('a well-timed sprint escapes its lunge; standing your ground does not', () => {
@@ -218,8 +256,8 @@ test('the beam stops it dead; hold it there and it breaks and runs, a little lat
       }
       assert.equal(s.state, 'play', `${diff} round ${round}: caught while holding the beam on it`);
       assert.equal(st.state, 'flee', `${diff} round ${round}: still ${st.state} after 12 s of light`);
-      // (a step at most while the scanner spins up and the beam still flickers over it)
-      assert.ok(crept < 0.3, `${diff} round ${round}: crept ${crept.toFixed(2)} m in the light`);
+      // (a stride at most of a dash while the scanner spins up and the beam still flickers over it)
+      assert.ok(crept < 0.5, `${diff} round ${round}: crept ${crept.toFixed(2)} m in the light`);
       held.push(t - pinnedAt);
       // it runs away from you, never through you
       const d0 = st.euclid;

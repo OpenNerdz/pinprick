@@ -9,8 +9,12 @@
 //                     investigate
 //                        │ heard you close / felt the light
 //                        ▼
-//                      alert (freezes, turns to you) ──> hunt (on all fours, one lunge at the end)
-//                                                          │ lost you
+//                      alert (freezes, turns to you) ──> hunt: in bursts. It dashes on all fours toward
+//                                                          where it last placed you, faster than you
+//                                                          can sprint, then stops dead, ear open, and
+//                                                          clicks; anything moving in the echo, it has.
+//                                                          Move while it runs, freeze when it clicks.
+//                                                          │ clicks that find nothing, a few in a row
 //                                                          ▼
 //                      search: where it reckons you went, then spots around it, stopping to listen.
 //                              Any sound gives you away, and it can walk into you. Then back to patrol.
@@ -64,9 +68,10 @@ export class Stalker {
     this.light = 0; this.prevHits = 0; this.exposure = 0;
     this.lingerAfter = 0; this.lingerHid = false; this.heardYou = false;
     this.stuck = 0; this.lungeT = 0; this.stumbleT = 0; this.recoilT = 0; this.graceAfter = -99;
+    this.burst = 'dash'; this.burstT = 0; this.emptyClicks = 0; this.fixAtClick = -99; // the hunt's rhythm
+    this.fixFrom = {x: 0, z: 0};
     this.player = null;
     this.mimicT = this.span(STALKER.mimicEvery); this.groanT = this.span(STALKER.groanEvery);
-    this.rear = 0;
     this.dots = null;                     // the session's dot buffer, for the red sonar dots
     this.sonarT = this.span(STALKER.sonarWalking); this.pulseIn = -1;
     this.lastLit = -99; this.pinned = false; this.pinScream = -99; this.surgeT = 0; this.pinFor = 0;
@@ -96,7 +101,7 @@ export class Stalker {
     this.x = x; this.z = z;
     this.actor.on = true;
     this.state = state;
-    this.target = null; this.path = null; this.repathT = 0; this.sinceFix = 99; this.light = 0; this.exposure = 0; this.rear = 0;
+    this.target = null; this.path = null; this.repathT = 0; this.sinceFix = 99; this.light = 0; this.exposure = 0;
     this.stuck = 0; this.lungeT = 0; this.stumbleT = 0; this.timer = 0;
     this.pulseIn = -1; this.pinned = false; this.surgeT = 0; this.pinFor = 0; this.burnT = 0; this.echoT = -1; this.followD = STALKER.followFar;
     this.prevHits = this.actor.hits;
@@ -154,6 +159,7 @@ export class Stalker {
     if (state === 'listen') { this.timer = this.span(STALKER.listenTime); this.sonarT = Math.min(this.sonarT, 0.4 + this.rand() * 0.6); }
     if (state === 'wait') this.timer = this.span(STALKER.waitTime);
     if (state === 'alert') this.timer = this.diff.alertTime;
+    if (state === 'hunt') { this.burst = 'dash'; this.burstT = this.diff.dashTime; this.emptyClicks = 0; }
     if (state === 'search') {
       const g = this.guess();
       this.searchC.x = g.x; this.searchC.z = g.z;
@@ -194,15 +200,16 @@ export class Stalker {
     } else if (gap >= 3) { this.fixVel.x = 0; this.fixVel.z = 0; }
     if (gap > 0) this.fixT = T;
     this.lastKnown.x = x; this.lastKnown.z = z; this.sinceFix = 0;
+    this.fixFrom.x = this.x; this.fixFrom.z = this.z; // where it stood: the near side of wherever you went
   }
 
   /**
    * Where it reckons you are now: the last fix, carried on along the way you were heading for as long
    * as it has been without one (scaled by difficulty), stopping where the ground runs out.
    */
-  guess() {
+  guess(ahead = 2.5) {
     const L = this.lastKnown, g = this.guessPt, grid = this.pnav || this.nav;
-    const k = Math.min(this.sinceFix, 2.5) * this.diff.predict;
+    const k = Math.min(this.sinceFix, ahead) * this.diff.predict;
     g.x = L.x; g.z = L.z;
     const ex = this.fixVel.x * k, ez = this.fixVel.z * k, d = Math.hypot(ex, ez), n = Math.ceil(d / 0.5);
     for (let i = 1; i <= n; i++) {
@@ -225,6 +232,7 @@ export class Stalker {
   /** Start a click burst: you hear it now; the echo (red dots, and whether it finds you) comes a moment later. */
   click(T) {
     this.pulseIn = this.diff.sonarWarn;
+    this.actor.flare = 1; // the ear fans wide
     this.sounds.clicks(this.x, this.z, this.muffle(), true);
     if (this.euclid < this.diff.sonar + 4) this.events.push('windup');
   }
@@ -245,6 +253,7 @@ export class Stalker {
   /** The echo of a click burst: the red starts washing over everything within reach, and anyone moving in it is found. */
   echo(T, player) {
     const R = this.diff.sonar, [hx, hy, hz] = headOf(this.actor);
+    this.actor.flare = 1;
     if (this.dots && this.euclid < 32) this.echoRays = STALKER.sonarRays;
     // you, inside the echo: in reach and nothing solid between you
     const dx = player.x - hx, dy = player.eye - 0.35 - hy, dz = player.z - hz, d = Math.hypot(dx, dy, dz);
@@ -350,8 +359,11 @@ export class Stalker {
       this.sounds.shriek(this.x, this.z, this.muffle(), 0.07);
       this.events.push('pinned');
     }
-    if (wasPinned && !this.pinned && heldFor > STALKER.surgeAfter
-        && (this.hunting || this.state === 'search' || this.state === 'alert')) this.surgeT = STALKER.surge;
+    if (wasPinned && !this.pinned && heldFor > STALKER.surgeAfter) {
+      // let go, it comes at once: hunting, a fresh dash straight at you; otherwise a burst of speed
+      if (this.state === 'hunt') { this.fix(player.x, player.z, T); this.burst = 'dash'; this.burstT = this.diff.dashTime; this.pulseIn = -1; }
+      else if (this.hunting || this.state === 'search' || this.state === 'alert') this.surgeT = STALKER.surge;
+    }
     // once it knows you are there, hold it in the light long enough and it breaks and runs; each time it
     // takes longer to break. After the last core it does not run: the light only holds it.
     this.burnT = this.pinned && !this.calm && this.state !== 'finale' ? this.burnT + dt : Math.max(0, this.burnT - dt * 0.5);
@@ -432,10 +444,32 @@ export class Stalker {
       }
       case 'hunt': {
         this.sinceFix += dt;
-        // with no fresh sound it heads where it reckons you are going, not where you were
-        this.target = this.sinceFix > 0.5 ? this.guess() : this.lastKnown;
-        speed = STALKER.hunt;
-        if (this.sinceFix > STALKER.loseAfter || (this.arrived() && this.sinceFix > 0.8)) this.enter('search', T);
+        if (this.burst === 'dash') {
+          // with no fresh sound it heads a little way along where it reckons you were going, and pulls up
+          // just short of there to listen rather than charging blindly through
+          this.target = this.sinceFix > 0.5 ? this.guess(1) : this.lastKnown;
+          speed = STALKER.dash;
+          const short = this.sinceFix > 0.5 && Math.hypot(this.target.x - this.x, this.target.z - this.z) < 1.3;
+          if ((this.burstT -= dt) <= 0 || short || (this.arrived() && this.sinceFix > 0.3)) {
+            // stop dead, ear open, and click: the echo comes a moment later
+            this.burst = 'click'; this.target = null; this.fixAtClick = this.fixT;
+            this.pulseIn = this.diff.huntWarn; this.actor.flare = 1;
+            this.sounds.clicks(this.x, this.z, this.muffle(), 'short');
+            if (this.euclid < this.diff.sonar + 4) { this.events.push('windup'); this.events.push('huntclick'); }
+          }
+        } else { // standing, head up, listening, until its echo has gone out
+          listening = true; breath = 0.2;
+          const want = Math.atan2(this.lastKnown.x - this.x, -(this.lastKnown.z - this.z));
+          this.face += clamp(angleDiff(this.face, want), -4 * dt, 4 * dt);
+          if (this.pulseIn < 0) {
+            // nothing moved in the echo and nothing heard since the click: an empty one. Empty right where
+            // it last placed you, you are not there: it searches the area (a few in a row, anywhere, too)
+            this.emptyClicks = this.fixT > this.fixAtClick ? 0 : this.emptyClicks + 1;
+            const there = Math.hypot(this.lastKnown.x - this.x, this.lastKnown.z - this.z) < 2.5;
+            if (this.emptyClicks >= this.diff.huntCycles || (this.emptyClicks > 0 && there)) { this.enter('search', T); break; }
+            this.burst = 'dash'; this.burstT = this.diff.dashTime;
+          }
+        }
         break;
       }
       case 'search': {
@@ -525,7 +559,7 @@ export class Stalker {
     } else if (this.surgeT > 0) { this.surgeT -= dt; speed *= 1.35; this.lungeT = 0; } // a surge, but no lunge on top
     // the last few metres come at you in one lunge; if it misses, it stumbles and you can get away
     else if (this.stumbleT > 0) { this.stumbleT -= dt; speed *= 0.5; }
-    else if (this.hunting && this.euclid < STALKER.lungeDist && nav.lineClear(this.x, this.z, player.x, player.z)) {
+    else if (this.state === 'finale' && this.euclid < STALKER.lungeDist && nav.lineClear(this.x, this.z, player.x, player.z)) {
       speed *= STALKER.lunge;
       if ((this.lungeT += dt) > this.diff.lungeMax) { this.lungeT = 0; this.stumbleT = STALKER.stumble; }
     } else this.lungeT = Math.max(0, this.lungeT - dt);
@@ -539,8 +573,10 @@ export class Stalker {
 
     this.ears = listening || this.state === 'wait';
     const low = this.world.heightAt(this.x, this.z) < STALKER.crawlBelow;
-    this.rear += ((this.pinned ? 0.55 : 0) - this.rear) * Math.min(1, dt * 6); // it rears up in the light
-    animateCreature(A, dt, speed, (this.hunting || low) && !this.pinned ? 1 : 0, listening, this.rear);
+    // in the light it rears back and covers its face; listening, its ear opens
+    // hunting it runs on all fours and rises onto its haunches, head up, to click
+    const crawl = this.pinned ? 0 : this.state === 'hunt' && this.burst === 'click' ? (low ? 1 : 0.45) : this.hunting || low ? 1 : 0;
+    animateCreature(A, dt, {speed, crawl, listening, shield: this.pinned ? 1 : 0});
     A.place(this.x, this.z, this.face);
 
     // the sound of it. Stalking, its feet land just after yours, so you hear your own steps twice.
@@ -570,7 +606,7 @@ export class Stalker {
     if (d < 1.1) { this.x = player.x + dx / d * 1.1; this.z = player.z + dz / d * 1.1; }
     const want = Math.atan2(player.x - this.x, -(player.z - this.z));
     this.face += clamp(angleDiff(this.face, want), -12 * dt, 12 * dt);
-    animateCreature(this.actor, dt, 0, 0, true, 1);
+    animateCreature(this.actor, dt, {listening: true, rear: 1}); // over you, its face open
     this.actor.place(this.x, this.z, this.face);
     this.sounds.setBreath(0, this.x, this.z);
   }
@@ -605,6 +641,8 @@ export class Stalker {
     if (s < 0 || !low(s)) return null;
     const seen = new Uint8Array(P.n), q = [s];
     seen[s] = 1;
+    // far from the side it was on when it last placed you (where it is now may be halfway round already)
+    const from = this.nav.field(this.fixFrom.x, this.fixFrom.z, this.tmpField);
     let best = null, bd = -1;
     for (let h = 0; h < q.length; h++) {
       const i = q[h], ix = i % P.nw, iz = (i - ix) / P.nw;
@@ -615,7 +653,7 @@ export class Stalker {
         if (seen[j] || !P.walk[j]) continue;
         seen[j] = 1;
         if (low(j)) { q.push(j); continue; }
-        const d = this.nav.distAt(this.field, P.cx(j), P.cz(j), 2); // an opening: how far it is to walk round
+        const d = this.nav.distAt(from, P.cx(j), P.cz(j), 2); // an opening: how far it is to walk round
         if (isFinite(d) && d > bd) { bd = d; best = {x: P.cx(j), z: P.cz(j)}; }
       }
     }

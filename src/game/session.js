@@ -220,6 +220,7 @@ export class Session {
     else if (e === 'echo') this.hint('echo', 'Your footsteps sound doubled.');
     else if (e === 'flee') this.hint('flee', 'It ran from the light. It will be back.');
     else if (e === 'ping') this.hint('ping', 'It heard the tracker. Up close, it can.');
+    else if (e === 'huntclick') this.hint('huntclick', 'It stops to click. Freeze when it clicks; move when it runs.');
   }
 
   /** The tracker's own news. Battery news is said on every difficulty; it is not a hint, you need it. */

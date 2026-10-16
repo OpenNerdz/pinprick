@@ -63,7 +63,7 @@ export default {
   statue: {x: 24.6, z: 5.0, face: Math.PI, lift: 0.9},
   notes: [
     {x: 13.4, z: 24.6, title: 'Operator log, day 3',
-      text: 'It does not see. I am sure of that now. It came down the hall while I stood still with the scanner off, and it walked straight past me.\n\nIt was listening. When it listens it clicks, and a moment later the walls light up red around it, like it has a scanner of its own. Whatever moves in that red, it finds. Freeze on the first click.'},
+      text: 'It does not see. I am sure of that now. It came down the hall while I stood still with the scanner off, and it walked straight past me.\n\nIt was listening. When it listens it clicks, and a moment later the walls light up red around it, like it has a scanner of its own. Whatever moves in that red, it finds. Freeze on the first click.\n\nWhen it hunts it does the same, only faster: a rush on all fours, then dead still, that thing on its head opening like a flower, and the clicks. Move while it runs. Freeze when it clicks.'},
     {x: 16.8, z: 7.2, title: 'Operator log, day 4',
       text: 'Do not hold the trigger for long. The hum carries. The sweep is worse: it hears that from anywhere on the level.\n\nBut it hates the light. Hold the beam on it and it cannot move, and if you keep it there it screams and runs. It knows where you are, though, it takes longer to break every time, and the scanner always overheats in the end. Do not let the heat run out with it in front of you.\n\nWhen the signal fills with static, it is close. Stop, crouch, wait.\n\nThe tracker only sees what moves. When the dot stops it has not gone; it is listening. Up close it hears the tick.'},
   ],
