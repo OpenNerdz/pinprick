@@ -8,10 +8,26 @@
 //   dev ─┘  (muffled after  │                              │
 //            a scare)       ui (your heart, the dread: inside your head, never muffled)
 //   dev is your devices' small speaker: no bass, a honk in the upper mids.
+//
+// Placed voices sit at world points and ctx.listener follows your head, so they stay put as you turn.
 
 import {clamp} from '../util/math.js';
 
 const MAX_VOICES = 40;
+// a placed sound with no distance of its own is this far off, so walking does not swing it about
+const FAR = 30;
+
+// Each level's reverb, by what its walls are like: t60 of the low, middle and top of the sound (s), how
+// long the response runs (s), where the first reflections start and how far they spread (s), how hard
+// they are, how long the diffuse tail takes to build (s), and a flutter between hard parallel walls.
+// `wet` evens out the loudness, because the convolver normalises each response by its own power.
+const ROOMS = {
+  sublevel: {t: [2.6, 1.9, 0.8], len: 3.2, early: [0.007, 0.085], hard: 0.5, build: 0.04, wet: 1}, // bare tunnels
+  intake: {t: [1.5, 1.1, 0.45], len: 2.2, early: [0.004, 0.04], hard: 0.55, build: 0.02, wet: 1.2}, // small concrete rooms
+  cistern: {t: [3.6, 3.0, 1.3], len: 4, early: [0.016, 0.15], hard: 0.4, build: 0.09, wet: 1}, // a huge flooded tank
+  shaft: {t: [3.0, 2.2, 0.7], len: 3.4, early: [0.006, 0.07], hard: 0.45, build: 0.05, wet: 1.3, flutter: {every: 0.041, n: 18, g: 0.4}}, // steel and a long drop
+  pumphall: {t: [4.2, 3.2, 1.1], len: 4.4, early: [0.022, 0.2], hard: 0.35, build: 0.12, wet: 1}, // a vast round hall
+};
 
 export class AudioEngine {
   constructor() {
@@ -20,11 +36,15 @@ export class AudioEngine {
     this.muted = false;
     this.voices = 0;
     this.listener = {x: 0, z: 0, yaw: 0};
+    this.told = {x: 0, z: 0, yaw: 0}; // what ctx.listener was last told
+    this.roomId = 'sublevel';
+    this.roomNow = null;
+    this.irs = new Map();
   }
 
   /** Must run from a user gesture. Safe to call repeatedly. */
   init() {
-    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return true; }
+    if (this.ctx) { if (this.ctx.state !== 'running') this.ctx.resume(); return true; } // iOS can also say `interrupted`
     const A = window.AudioContext || window.webkitAudioContext;
     if (!A) return false;
     try { this.ctx = new A({latencyHint: 'interactive'}); } catch (e) { this.ctx = null; return false; }
@@ -39,10 +59,11 @@ export class AudioEngine {
     this.amb = c.createGain(); this.amb.connect(this.world);
     this.ui = c.createGain(); this.ui.connect(this.master);
     // the cave
-    this.rev = c.createConvolver(); this.rev.buffer = this.cave();
+    this.rev = c.createConvolver();
     this.revIn = c.createGain();
-    const revOut = c.createGain(); revOut.gain.value = 0.8;
-    this.revIn.connect(this.rev); this.rev.connect(revOut); revOut.connect(this.world);
+    this.revOut = c.createGain(); this.revOut.gain.value = 0.8;
+    this.revIn.connect(this.rev); this.rev.connect(this.revOut); this.revOut.connect(this.world);
+    this.roomSoon();
     // `echo` is a little of the room on sounds that ask for it
     this.echo = c.createGain(); this.echo.gain.value = 0.3; this.echo.connect(this.revIn);
     // `slap`: the game's original short repeating echo, which the scanner's purr and sweep keep
@@ -62,6 +83,9 @@ export class AudioEngine {
     this.dev.connect(hp); hp.connect(honk); honk.connect(ring); ring.connect(lp); lp.connect(cone); cone.connect(this.world);
     const devRoom = c.createGain(); devRoom.gain.value = 0.06; cone.connect(devRoom); devRoom.connect(this.revIn);
     this.hrtf = typeof c.createPanner === 'function';
+    // the first HRTF panner sets the browser loading its ear data on another thread: do that now, not on
+    // the creature's first sound (made mid-render, it stalled the offline scenes in tools/audition)
+    if (this.hrtf) { this.earData = c.createPanner(); this.earData.panningModel = 'HRTF'; }
     this.noiseBuf = c.createBuffer(1, c.sampleRate * 2, c.sampleRate);
     const nd = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
@@ -69,27 +93,70 @@ export class AudioEngine {
   }
 
   /**
-   * The cave's impulse response: a scatter of hard early reflections off the nearest walls, then a
-   * diffuse tail building up over 40 ms. Lows ring longest; air and rock soak up the highs first.
+   * A room's impulse response: a scatter of hard early reflections off the nearest walls, then a diffuse
+   * tail building up. Lows ring longest; air and rock soak up the highs first.
    */
-  cave() {
-    const c = this.ctx, sr = c.sampleRate, len = Math.floor(sr * 3.2), ir = c.createBuffer(2, len, sr);
+  cave(room) {
+    const c = this.ctx, sr = c.sampleRate, len = Math.floor(sr * room.len), ir = c.createBuffer(2, len, sr);
     const kl = 1 - Math.exp(-6.283 * 500 / sr), kh = 1 - Math.exp(-6.283 * 3000 / sr);
+    const fl = Math.exp(-6.9 / (room.t[0] * sr)), fm = Math.exp(-6.9 / (room.t[1] * sr)), fh = Math.exp(-6.9 / (room.t[2] * sr));
+    const b0 = 0.01 * sr, bn = room.build * sr;
     for (let ch = 0; ch < 2; ch++) {
       const d = ir.getChannelData(ch);
-      let lo = 0, hi = 0;
+      let lo = 0, hi = 0, el = 0.56, em = 0.35, eh = 0.175;
       for (let i = 0; i < len; i++) {
-        const t = i / sr, n = Math.random() * 2 - 1;
+        const n = Math.random() * 2 - 1;
         lo += (n - lo) * kl; hi += (n - hi) * kh;
-        const build = Math.min(1, Math.max(0, (t - 0.01) / 0.04));
-        d[i] = build * (lo * Math.exp(-6.9 * t / 2.6) * 1.6 + (hi - lo) * Math.exp(-6.9 * t / 1.9) + (n - hi) * Math.exp(-6.9 * t / 0.8) * 0.5) * 0.35;
+        const build = i < b0 ? 0 : i < b0 + bn ? (i - b0) / bn : 1;
+        d[i] = build * (lo * el + (hi - lo) * em + (n - hi) * eh);
+        el *= fl; em *= fm; eh *= fh;
       }
+      const sign = () => (Math.random() < 0.5 ? -1 : 1);
       for (let k = 0; k < 14; k++) {
-        const t = 0.007 + Math.pow(k / 14, 1.3) * 0.085 + Math.random() * 0.004;
-        d[Math.floor(t * sr)] += (Math.random() < 0.5 ? -1 : 1) * 0.5 * (1 - k / 16) * (0.6 + 0.4 * Math.random());
+        const t = room.early[0] + Math.pow(k / 14, 1.3) * room.early[1] + Math.random() * 0.004;
+        d[Math.floor(t * sr)] += sign() * room.hard * (1 - k / 16) * (0.6 + 0.4 * Math.random());
       }
+      const flutter = room.flutter;
+      if (flutter) for (let k = 1; k <= flutter.n; k++) d[Math.floor((k * flutter.every + Math.random() * 0.001) * sr)] += sign() * flutter.g * (1 - k / (flutter.n + 1));
     }
     return ir;
+  }
+
+  /** Which level's walls these are. Unknown levels sound like the tunnels. */
+  setRoom(id) {
+    this.roomId = ROOMS[id] ? id : 'sublevel';
+    if (this.ctx) this.roomSoon();
+  }
+
+  /**
+   * Change rooms once the tap that started the level is over, when its id is final, so the response is
+   * only made once: make it in one task and install it in the next, because each is a stall on a phone.
+   */
+  roomSoon() {
+    clearTimeout(this.roomT);
+    this.roomT = setTimeout(() => {
+      if (this.roomId === this.roomNow) return;
+      this.response(this.roomId);
+      this.roomT = setTimeout(() => this.applyRoom(), 0);
+    }, 0);
+  }
+
+  response(id) {
+    let ir = this.irs.get(id);
+    if (!ir) { ir = this.cave(ROOMS[id]); this.irs.set(id, ir); }
+    return ir;
+  }
+
+  /** Change rooms now. */
+  applyRoom() {
+    const id = this.roomId;
+    if (!this.ctx || id === this.roomNow) return;
+    this.roomNow = id;
+    const room = ROOMS[id], ir = this.response(id);
+    // the old tail stops as the buffer changes, so dip the return across it rather than click
+    const g = this.revOut.gain, t = this.now;
+    g.cancelScheduledValues(t); g.setValueAtTime(0, t); g.setTargetAtTime(0.8 * room.wet, t + 0.03, 0.04);
+    this.rev.buffer = ir;
   }
 
   get now() { return this.ctx ? this.ctx.currentTime : 0; }
@@ -98,11 +165,14 @@ export class AudioEngine {
   setMuted(m) { this.muted = m; this.applyGain(); }
   applyGain() { if (this.ctx) this.master.gain.setTargetAtTime(this.muted ? 0 : this.volume, this.now, 0.03); }
 
-  /** Suspend sound while paused or backgrounded. */
+  /**
+   * Suspend sound while paused or backgrounded. Always asks: `state` lags a request still in flight, so
+   * going by it, a quick pause and resume can leave the game silent.
+   */
   suspend(on) {
     if (!this.ctx) return;
-    if (on && this.ctx.state === 'running') this.ctx.suspend();
-    else if (!on && this.ctx.state === 'suspended') this.ctx.resume();
+    const r = on ? this.ctx.suspend() : this.ctx.resume();
+    r?.catch?.(() => {});
   }
 
   /** Muffle everything, as if your ears were ringing, and let it come back over `secs`. */
@@ -112,23 +182,49 @@ export class AudioEngine {
     f.cancelScheduledValues(t); f.setValueAtTime(450, t); f.setTargetAtTime(20000, t + 0.3, secs / 3);
   }
 
-  /** Pan (-1..1), straight distance and facing (1 ahead, -1 behind) of a world point from the listener. */
-  place(x, z) {
+  /**
+   * Pan (-1..1), straight distance and facing (1 ahead, -1 behind) of a world point from the listener.
+   * Per-frame callers pass their own `out` so that nothing is allocated.
+   */
+  place(x, z, out = {}) {
     const L = this.listener, dx = x - L.x, dz = z - L.z, d = Math.hypot(dx, dz) || 0.001;
     const rx = Math.cos(L.yaw), rz = Math.sin(L.yaw), fx = Math.sin(L.yaw), fz = -Math.cos(L.yaw);
-    return {pan: clamp((dx * rx + dz * rz) / d, -1, 1), dist: d, front: (dx * fx + dz * fz) / d};
+    out.pan = clamp((dx * rx + dz * rz) / d, -1, 1); out.dist = d; out.front = (dx * fx + dz * fz) / d;
+    return out;
   }
 
   /**
-   * Route a voice out. o: {bus, pos ({pan, front} from place(): placed in 3D round your head, so behind
-   * sounds behind), pan (simple left/right), echo, slap, rev (reverb send)}.
+   * Tell Web Audio where your head is, so that placed voices stay where they are in the world as you
+   * turn and walk. Call every frame; allocates nothing. Firefox and older Safari and WebViews have only
+   * the setter methods.
+   */
+  syncListener() {
+    const c = this.ctx, L = this.listener, H = this.told;
+    if (!c || (L.x === H.x && L.z === H.z && L.yaw === H.yaw)) return;
+    H.x = L.x; H.z = L.z; H.yaw = L.yaw;
+    const A = c.listener, fx = Math.sin(L.yaw), fz = -Math.cos(L.yaw);
+    if (A.positionX && A.forwardX) { A.positionX.value = L.x; A.positionZ.value = L.z; A.forwardX.value = fx; A.forwardZ.value = fz; }
+    else { A.setPosition(L.x, 0, L.z); A.setOrientation(fx, 0, fz, 0, 1, 0); }
+  }
+
+  /**
+   * Route a voice out. o: {bus, pos ({pan, front, dist} from place(): placed in 3D round your head, so
+   * behind sounds behind), pan (simple left/right), occ (Hz: rock in the way, dulling the sound that
+   * comes straight at you but not what it sets ringing in the room), echo, slap, rev (reverb send)}.
    */
   out(node, o) {
     let n = node;
+    if (o.occ) {
+      const f = this.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.occ; f.Q.value = 0.6;
+      n.connect(f); n = f;
+    }
     if (o.pos && this.hrtf) {
+      this.syncListener();
       const p = this.ctx.createPanner();
       p.panningModel = 'HRTF'; p.distanceModel = 'linear'; p.rolloffFactor = 0;
-      const x = o.pos.pan, y = o.pos.up || 0, z = -o.pos.front;
+      // back from head-relative to a point in the world (rolloff 0: its distance only sets how fast it swings as you walk)
+      const L = this.listener, d = o.pos.dist || FAR, rx = Math.cos(L.yaw), rz = Math.sin(L.yaw), fx = Math.sin(L.yaw), fz = -Math.cos(L.yaw);
+      const x = L.x + d * (o.pos.pan * rx + o.pos.front * fx), y = o.pos.up || 0, z = L.z + d * (o.pos.pan * rz + o.pos.front * fz);
       if (p.positionX) { p.positionX.value = x; p.positionY.value = y; p.positionZ.value = z; } else p.setPosition(x, y, z);
       n.connect(p); n = p;
     } else if ((o.pan || o.pos) && this.ctx.createStereoPanner) {
@@ -138,7 +234,7 @@ export class AudioEngine {
     n.connect(o.bus || this.sfx);
     if (o.echo) n.connect(this.echo);
     if (o.slap) n.connect(this.slap);
-    if (o.rev) { const s = this.ctx.createGain(); s.gain.value = o.rev; n.connect(s); s.connect(this.revIn); }
+    if (o.rev) { const s = this.ctx.createGain(); s.gain.value = o.rev; (o.occ ? node : n).connect(s); s.connect(this.revIn); }
   }
 
   /** A soft-clipping waveshaper; `drive` 1 is gentle, 8 is torn. Curves are cached per drive. */
@@ -159,15 +255,20 @@ export class AudioEngine {
     return true;
   }
 
-  /** Play a buffer. o: {gain, rate, at, lp (Hz, a muffling low-pass), loop, plus out()'s options}. */
+  /**
+   * Play a buffer; no buffer yet (still rendering) just plays nothing. o: {gain, rate, at, lp (Hz, a
+   * muffling low-pass), plus out()'s options}. Behind you it dulls further, the shadow of your ears:
+   * the panner alone leaves front and back only a few dB apart.
+   */
   play(buf, o = {}) {
     if (!buf || !this.claim()) return null;
     const c = this.ctx, t = c.currentTime + (o.at || 0);
     const s = c.createBufferSource(); s.buffer = buf;
     if (o.rate) s.playbackRate.value = o.rate;
     let n = s;
-    if (o.lp && o.lp < 16000) {
-      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = Math.max(80, o.lp); f.Q.value = 0.5;
+    const lp = o.pos && o.pos.front < 0 ? (o.lp || 16000) * (1 + 0.5 * o.pos.front) : o.lp;
+    if (lp && lp < 16000) {
+      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = Math.max(80, lp); f.Q.value = 0.5;
       n.connect(f); n = f;
     }
     const g = c.createGain(); g.gain.value = o.gain ?? 1;

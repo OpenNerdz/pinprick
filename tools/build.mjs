@@ -10,8 +10,14 @@ import {fileURLToPath} from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const src = p => join(root, 'src', p);
 
+// the synth's Worker, inlined as text: the game has to stay one file
+const worker = await build({
+  entryPoints: [src('audio/worker.js')], bundle: true, format: 'iife', minify: true, write: false,
+  target: ['es2020', 'chrome90', 'safari14'], legalComments: 'none',
+});
 const js = await build({
   entryPoints: [src('main.js')], bundle: true, format: 'iife', minify: true, write: false,
+  define: {__SYNTH_WORKER__: JSON.stringify(worker.outputFiles[0].text)},
   target: ['es2020', 'chrome90', 'safari14'], legalComments: 'none',
 });
 const script = js.outputFiles[0].text.replace(/<\/(script)/gi, '<\\/$1').trim();

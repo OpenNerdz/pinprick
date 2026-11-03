@@ -81,7 +81,11 @@ export default {
     {x: 19, z: 13.5, r: 2.5, cores: 2, actions: [['statue', 19, 12.8, Math.PI, 0]]},
     {x: 6, z: 21, r: 2, cores: 1, delay: 0.6, actions: [['silence', 4], ['behind', 2.4]]},
     {x: 10, z: 4.5, r: 2, actions: [['whisper', 2.6, 3]]},
+    // on the tracker, something goes across the store beyond the west door. There is nothing to hear.
+    {x: 22, z: 19, r: 3, cores: 1, tracker: true, look: [11, 19], actions: [['crossing', 9.4, 15.5, 9.4, 23, 1.5]]},
   ],
+  // narrow, with one hub every route crosses: a gentler creature, or this would be the hardest level in the game
+  tune: {hearing: 0.75, sonar: 0.8},
   stalker: {
     spawn: [31, 12], wake: 'core:1',
     patrol: [[31, 10], [20, 4.5], [8, 4.5], [6, 20], [14, 13.6], [24.5, 21], [19, 28.5], [33, 6.8]],

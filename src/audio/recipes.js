@@ -346,25 +346,24 @@ function whisper(sr, r) {
 
 // ---------------------------------------------------------------- the tunnels
 
-/** Room tone: the deep rumble of rock and plant, and air moving through the tunnels, rising and falling. */
+/**
+ * Room tone: the deep rumble of rock and plant, and air moving through the tunnels, rising and falling.
+ * The right ear hears the same loop 1.9 s on: noise that far apart is as unrelated as two renders, and it
+ * costs half the time, which matters because this one renders during the tap that starts the game.
+ */
 function bed(sr, r) {
-  const n = Math.floor(sr * 12), fade = Math.floor(sr * 1), out = [];
-  for (let c = 0; c < 2; c++) {
-    const a = new Float32Array(n + fade), lp = new Filter(sr, 'lp', 90, 0.7), m1 = new Mode(sr, 43, 1.5, 0.4), m2 = new Mode(sr, 67, 1.2, 0.3);
-    const air = new Filter(sr, 'bp', 320, 0.6), air2 = new Filter(sr, 'lp', 900, 0.7), hi = new Filter(sr, 'bp', 2200, 0.8);
-    let br = 0;
-    for (let j = 0; j < a.length; j++) {
-      const t = j / sr;
-      br = br * 0.997 + r.white() * 0.05;
-      const swell = 0.6 + 0.25 * Math.sin(TAU * t / 12 + c) + 0.15 * Math.sin(TAU * 3 * t / 12 + 2 * c);
-      a[j] = lp.run(br) * 2 + (m1.run(r.white()) + m2.run(r.white())) * 0.02 + air2.run(air.run(r.white())) * 0.5 * swell + hi.run(r.white()) * 0.025 * swell;
-    }
-    out.push(loopify(a, fade));
+  const n = Math.floor(sr * 12), fade = Math.floor(sr * 1);
+  const a = new Float32Array(n + fade), lp = new Filter(sr, 'lp', 90, 0.7), m1 = new Mode(sr, 43, 1.5, 0.4), m2 = new Mode(sr, 67, 1.2, 0.3);
+  const air = new Filter(sr, 'bp', 320, 0.6), air2 = new Filter(sr, 'lp', 900, 0.7), hi = new Filter(sr, 'bp', 2200, 0.8);
+  let br = 0, swell = 0;
+  for (let j = 0; j < a.length; j++) {
+    if ((j & 31) === 0) { const t = j / sr; swell = 0.6 + 0.25 * Math.sin(TAU * t / 12) + 0.15 * Math.sin(TAU * 3 * t / 12); }
+    br = br * 0.997 + r.white() * 0.05;
+    a[j] = lp.run(br) * 2 + (m1.run(r.white()) + m2.run(r.white())) * 0.02 + air2.run(air.run(r.white())) * 0.5 * swell + hi.run(r.white()) * 0.025 * swell;
   }
-  let m = 0;
-  for (const a of out) for (let j = 0; j < a.length; j++) m = Math.max(m, Math.abs(a[j]));
-  for (const a of out) for (let j = 0; j < a.length; j++) a[j] *= 0.9 / m;
-  return out;
+  const L = norm(loopify(a, fade)), R = new Float32Array(n), k = Math.floor(sr * 12 / TAU);
+  for (let j = 0; j < n; j++) R[j] = L[(j + k) % n];
+  return [L, R];
 }
 
 /** A drop into a puddle: the bubble it traps rings and rises in pitch as it shrinks. */
@@ -445,6 +444,150 @@ function wind(sr, r) {
   return done(a, sr, 100);
 }
 
+// ---------------------------------------------------------------- holding your breath, the stone
+
+/** A soft push from a mass, not a sharp hit: `ms` long, so it rings the low modes of `body` and hardly the high. */
+function thump(a, sr, i0, amp, ms, body, tail) {
+  const push = Math.floor(ms * sr / 1000), n = Math.min(a.length - i0, Math.floor(tail * sr));
+  for (let j = 0; j < n; j++) a[i0 + j] += body.run(j < push ? Math.sin(Math.PI * j / push) * amp : 0);
+}
+
+/** Your arm and sleeve going past your ear: the cloth's hiss sweeps up and down, catching as it goes, right to front. */
+function swish(sr, r) {
+  const a = buf(sr, r.range(0.2, 0.27)), n = a.length, top = r.range(0.35, 0.5), bp = new Filter(sr, 'bp', 600, 1), hp = new Filter(sr, 'hp', 280, 0.7);
+  let g = 1, gt = 0;
+  for (let j = 0; j < n; j++) {
+    const p = j / n, e = p < top ? (p / top) ** 2 : ((1 - p) / (1 - top)) ** 1.6;
+    if ((j & 15) === 0) bp.set('bp', 500 + 2800 * e, 1);
+    if (--gt <= 0) { g = r.range(0.55, 1); gt = r.range(0.002, 0.007) * sr; } // the weave catching
+    a[j] = hp.run(bp.run(r.white())) * e * g;
+  }
+  edges(norm(a), sr, 1, 15);
+  const L = new Float32Array(n), R = new Float32Array(n);
+  for (let j = 0; j < n; j++) { const p = j / n; R[j] = a[j] * (0.95 - 0.2 * p); L[j] = a[j] * (0.18 + 0.32 * p); }
+  return [L, R];
+}
+
+/** A small stone on concrete: a hard high clack off its few stiff modes and a dull knock from the floor. A full hit skitters on. */
+function stone(light) {
+  return (sr, r) => {
+    const a = buf(sr, light ? 0.1 : 0.42), size = r.range(0.85, 1.2);
+    const body = () => new Body(sr, [[r.range(2600, 4000) * size, r.range(0.006, 0.012), 1], [r.range(5200, 7400) * size, 0.005, 0.55], [r.range(1150, 1600) * size, 0.012, 0.5], [r.range(380, 520), 0.016, 0.45]]);
+    strike(a, sr, r, body(), 0, 1, 0.25, 0.08);
+    burst(a, sr, r, 0, 0.3, 0.0002, 0.0012, [new Filter(sr, 'lp', 1800, 0.7)]);
+    if (!light) {
+      let t = r.range(0.04, 0.07), gap = r.range(0.05, 0.08), g = r.range(0.4, 0.55);
+      for (let k = r.int(3, 6); k > 0 && t < 0.36; k--) {
+        strike(a, sr, r, body(), Math.floor(t * sr), g, 0.15, 0.04);
+        t += gap; gap *= r.range(0.65, 0.9); g *= r.range(0.6, 0.85);
+      }
+      grit(a, sr, r, 0.03, 0.36, r.int(6, 12), 0.06, 3000);
+    }
+    return done(a, sr, light ? 10 : 20);
+  };
+}
+
+/** A small caught breath: in through the mouth, rising, then the throat shuts on it. */
+function breathCatch(sr, r) {
+  const dur = r.range(0.15, 0.21), a = buf(sr, dur + 0.03);
+  mix(a, throat(sr, r, {dur, f0: 140, voice: 0, breath: 1, puff: 0, vowels: 'hi', scale: 1.2, bw: 2.2, env: p => (p / 0.85 > 1 ? 1 : p / 0.85) ** 1.4 * Math.min(1, (1 - p) / 0.06)}));
+  strike(a, sr, r, new Body(sr, [[r.range(900, 1300), 0.008, 1], [r.range(280, 360), 0.012, 0.6]]), Math.floor(dur * sr), 0.14, 0.3, 0.03);
+  return edges(norm(a, 0.8), sr, 1, 6);
+}
+
+/** Letting it go slowly through pursed lips, keeping it quiet: narrow, even, with the slightest shake. */
+function breathLet(sr, r) {
+  const dur = r.range(0.8, 1.1), shake = r.range(5, 7);
+  return edges(throat(sr, r, {dur, f0: 110, voice: 0, breath: 1, puff: 0, vowels: 'hu', scale: 1.15, bw: 1.8, env: p => Math.min(1, p / 0.2) * (1 - p) ** 1.1 * (0.93 + 0.07 * Math.sin(TAU * shake * p * dur))}), sr, 3, 30);
+}
+
+/** Lungs out: air dragged in through a throat that will not open, voice squeaking on it, twice, then let go too fast. */
+function gasp(sr, r) {
+  const a = buf(sr, 1.3), f = r.range(330, 430), shake = r.range(11, 16);
+  const ragged = (dur, k) => p => Math.min(1, p / 0.05) * Math.min(1, (1 - p) / 0.07) * (0.7 + 0.3 * Math.sin(TAU * shake * p * dur)) * k;
+  const first = r.range(0.34, 0.44), second = r.range(0.34, 0.46), gap = r.range(0.04, 0.09);
+  mix(a, throat(sr, r, {dur: first, f0: p => f * (1 + 0.6 * p), jitter: 0.07, shimmer: 0.35, sub: 0.45, voice: p => 0.2 + 0.4 * p, breath: 1, puff: 0.7, vowels: 'hai', scale: 1.2, bw: 1.3, drive: 1.8, env: ragged(first, 1)}));
+  mix(a, throat(sr, r, {dur: second, f0: p => f * 0.8 * (1 + 0.35 * p), jitter: 0.09, shimmer: 0.4, sub: 0.55, voice: p => 0.35 * (1 - p), breath: 1, puff: 0.8, vowels: 'aeh', scale: 1.15, bw: 1.5, drive: 1.6, env: ragged(second, 0.8)}), Math.floor((first + gap) * sr));
+  const out = first + gap + second + r.range(0.03, 0.07);
+  mix(a, throat(sr, r, {dur: Math.min(0.42, 1.28 - out), f0: p => 150 * (1 - 0.25 * p), jitter: 0.05, shimmer: 0.2, voice: p => 0.4 * (1 - p), breath: 1, puff: 0.4, vowels: 'ao', scale: 1.05, bw: 1.8, env: p => Math.min(1, p / 0.05) * (1 - p) ** 1.5}), Math.floor(out * sr), 0.5);
+  return done(a, sr, 30);
+}
+
+// ---------------------------------------------------------------- the creature, closer
+
+/** Working something out: quick wet tongue-ticks in uneven little groups, over a thin voice that trills and rises like a question. */
+function crChitter(sr, r) {
+  const dur = r.range(0.5, 0.8), a = buf(sr, dur + 0.04), f = r.range(150, 205), up = r.range(0.35, 0.7), trill = r.range(22, 32);
+  mix(a, throat(sr, r, {dur, f0: p => f * (1 + up * p * p) * (1 + 0.1 * Math.sin(TAU * trill * p * dur)), jitter: 0.05, shimmer: 0.35, sub: 0.35, voice: 1, breath: 0.5, puff: 1.2, vowels: r.pick(['ue', 'oe', 'ui']), scale: 0.95, drive: 2, env: p => Math.min(1, p / 0.1) * Math.min(1, (1 - p) / 0.2) * (0.5 + 0.5 * Math.sin(TAU * trill * 0.5 * p * dur) ** 2)}), 0, 0.5);
+  let t = r.range(0, 0.03);
+  for (let groups = r.int(2, 3); groups > 0 && t < dur; groups--) {
+    for (let k = r.int(2, 4); k > 0 && t < dur; k--) {
+      strike(a, sr, r, new Body(sr, [[r.range(2000, 3400), 0.005, 0.6], [r.range(800, 1300), r.range(0.012, 0.022), 1]]), Math.floor(t * sr), r.range(0.5, 1), 0.4, 0.04);
+      burst(a, sr, r, t + 0.003, r.range(0.05, 0.14), 0.0002, 0.0007, [new Filter(sr, 'hp', 2500, 0.7)]);
+      t += r.range(0.028, 0.055);
+    }
+    t += r.range(0.07, 0.15);
+  }
+  return done(a, sr, 20);
+}
+
+/** Air drawn slowly through a wet nose right beside you: long narrow pulls that build and stop, a rattle under each. */
+function crSniff(sr, r) {
+  const pulls = r.int(2, 3), lens = Array.from({length: pulls}, () => r.range(0.38, 0.55)), gaps = Array.from({length: pulls}, () => r.range(0.1, 0.22));
+  const a = buf(sr, lens.reduce((s, v) => s + v, 0) + gaps.reduce((s, v) => s + v, 0) + 0.05), f = r.range(18, 26);
+  let t = 0;
+  lens.forEach((dur, k) => {
+    mix(a, throat(sr, r, {dur, f0: f, jitter: 0.3, shimmer: 0.45, oq: 0.3, voice: 0.08, breath: 1, puff: 1.6, vowels: 'ih', scale: 1.05, bw: 0.75, env: p => (p < 0.8 ? p / 0.8 : 1) ** 1.8 * Math.min(1, (1 - p) / 0.05)}), Math.floor(t * sr), 0.75 + 0.25 * k / pulls);
+    t += dur;
+    strike(a, sr, r, new Body(sr, [[r.range(1400, 2000), 0.006, 1], [r.range(600, 800), 0.01, 0.5]]), Math.floor(t * sr), 0.1, 0.3, 0.03); // the wet catch at the top
+    t += gaps[k];
+  });
+  return done(a, sr, 30);
+}
+
+/** A foot brought down on purpose: a slow boom through the floor, a flat slap of skin on top, grit shaken loose after. */
+function crStomp(sr, r) {
+  const a = buf(sr, 0.85);
+  thump(a, sr, 0, 0.5, 16, new Body(sr, [[r.range(34, 42), 0.5, 1], [r.range(70, 84), 0.3, 0.8]]), 0.8);
+  thump(a, sr, 0, 0.85, 2.5, new Body(sr, [[r.range(150, 185), 0.16, 1], [r.range(330, 400), 0.08, 0.9], [r.range(650, 850), 0.035, 0.6]]), 0.5); // what a phone's speaker can carry
+  burst(a, sr, r, 0.001, 0.5, 0.0012, 0.014, [new Filter(sr, 'lp', 1000, 0.7), new Filter(sr, 'peak', r.range(350, 480), 1, 8)]);
+  burst(a, sr, r, 0.002, 0.28, 0.0006, 0.004, [new Filter(sr, 'bp', r.range(1100, 1600), 1)]);
+  grit(a, sr, r, 0.1, 0.7, r.int(8, 14), 0.035, 1600);
+  return done(a, sr, 60);
+}
+
+// ---------------------------------------------------------------- the pump
+
+/** A vast pump's two strokes as one loop: the piston landing far down, the casing ringing, the valve sighing out. */
+function pumpBeat(sr, r) {
+  const T = 5.2, fade = Math.floor(0.3 * sr), a = new Float32Array(Math.floor(T * sr) + fade);
+  for (const [t0, g] of [[0.5, 1], [3.1, 0.78]]) {
+    const i0 = Math.floor(t0 * sr);
+    thump(a, sr, i0, g * 0.5, 30, new Body(sr, [[r.range(31, 36), 0.95, 1], [r.range(60, 68), 0.6, 0.8], [r.range(122, 136), 0.32, 0.7], [r.range(235, 280), 0.18, 0.6]]), 2.1);
+    thump(a, sr, i0, g * 0.6, 4, new Body(sr, [[r.range(170, 200), 0.3, 1], [r.range(390, 450), 0.16, 0.8], [r.range(760, 880), 0.07, 0.45]]), 0.8); // the casing: what a phone's speaker can carry
+    burst(a, sr, r, t0 + 0.9, g * 0.05, 0.22, 0.2, [new Filter(sr, 'bp', 1500, 0.7), new Filter(sr, 'lp', 3000, 0.7)]);
+  }
+  return norm(loopify(dcBlock(a, sr, 20), fade));
+}
+
+/** Its machinery: a motor's harmonics (a whole number of cycles in the loop, so the join cannot show) over churning air. */
+function pumpDrone(sr, r) {
+  const T = 4, n = Math.floor(T * sr), fade = Math.floor(0.5 * sr), raw = new Float32Array(n + fade);
+  const low = new Filter(sr, 'lp', 240, 0.7), mid = new Filter(sr, 'bp', 520, 1.1), hi = new Filter(sr, 'bp', 1350, 1.5);
+  for (let j = 0; j < raw.length; j++) { const x = r.white(); raw[j] = low.run(x) * 0.4 + mid.run(x) * 0.5 + hi.run(x) * 0.18; }
+  const L = loopify(raw, fade);
+  for (const [hz, amp] of [[47.25, 0.09], [47.75, 0.06], [94.5, 0.07], [141.75, 0.1], [189, 0.07], [283.5, 0.05], [378, 0.03], [1134, 0.005]]) {
+    const w = TAU * hz / sr, ph = r.range(0, TAU), c = 2 * Math.cos(w);
+    let y1 = amp * Math.sin(ph - w), y2 = amp * Math.sin(ph - 2 * w);
+    for (let j = 0; j < n; j++) { const y = c * y1 - y2; y2 = y1; y1 = y; L[j] += y; }
+  }
+  norm(L);
+  // the right ear a third of the loop on: the motor stays in phase (mono is safe), the air comes apart (it sounds wide)
+  const R = new Float32Array(n), k = Math.floor(n / 3);
+  for (let j = 0; j < n; j++) R[j] = L[(j + k) % n];
+  return [L, R];
+}
+
 export const RECIPES = {
   switch: {n: 3, make: switchClick},
   overheat: {n: 2, make: overheat},
@@ -454,6 +597,12 @@ export const RECIPES = {
   pantIn: {n: 3, rate: 0.5, make: pantIn},
   pantOut: {n: 3, rate: 0.5, make: pantOut},
   fearIn: {n: 3, rate: 0.5, make: fearIn},
+  breathCatch: {n: 3, rate: 0.5, make: breathCatch},
+  breathLet: {n: 3, rate: 0.5, make: breathLet},
+  gasp: {n: 3, rate: 0.5, make: gasp},
+  swish: {n: 3, rate: 0.5, make: swish},
+  stoneHit: {n: 5, make: stone(false)},
+  stoneTick: {n: 4, make: stone(true)},
   lub: {n: 2, rate: 0.5, make: heart(true)},
   dub: {n: 2, rate: 0.5, make: heart(false)},
   core: {make: core},
@@ -473,6 +622,9 @@ export const RECIPES = {
   crStep: {n: 8, make: crStep(false)},
   crHit: {n: 8, make: crStep(true)},
   crDrag: {n: 4, make: crDrag},
+  crChitter: {n: 4, rate: 0.5, make: crChitter},
+  crSniff: {n: 3, rate: 0.5, make: crSniff},
+  crStomp: {n: 4, rate: 0.5, make: crStomp},
   mimicTrigger: {n: 2, make: mimic('trigger')},
   mimicPing: {n: 2, rate: 0.5, make: mimic('ping')},
   mimicChime: {rate: 0.5, make: mimic('chime')},
@@ -487,4 +639,6 @@ export const RECIPES = {
   debris: {n: 3, make: debris},
   buzz: {n: 2, make: buzz},
   wind: {n: 2, rate: 0.5, make: wind},
+  pumpBeat: {loop: true, rate: 0.5, make: pumpBeat},
+  pumpDrone: {loop: true, rate: 0.5, make: pumpDrone},
 };

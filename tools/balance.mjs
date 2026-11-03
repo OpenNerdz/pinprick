@@ -1,7 +1,7 @@
 // Creature balance by difficulty: plays scripted players through the real Session (no browser) and
 // prints how often each gets caught. Run after changing the creature or the numbers in config.js.
 //   node tools/balance.mjs            every scenario
-//   node tools/balance.mjs stalked    just one (still, lunge, escape, sonar, stalked, beam, finale, wander, tracker)
+//   node tools/balance.mjs stalked    just one (still, lunge, escape, stone, sonar, stalked, beam, finale, wander, tracker)
 import {LEVELS} from '../src/levels/index.js';
 import {Session} from '../src/game/session.js';
 import {Camera} from '../src/render/camera.js';
@@ -62,7 +62,8 @@ if (on('lunge')) for (const diff of DIFFS) {
 }
 
 // 'rhythm' sneaks only while it dashes and freezes while it clicks: what the game teaches
-if (on('escape')) for (const plan of ['freeze', 'sneak', 'rhythm', 'hide']) for (const diff of DIFFS) row(`hunted from 9 m, run 5 s, then ${plan}`, diff, rate(8, (def, k) => {
+// 'hold' freezes and holds its breath, because it just ran and it can hear panting; 'hide+hold' does both
+if (on('escape')) for (const plan of ['freeze', 'hold', 'sneak', 'rhythm', 'hide', 'hide+hold']) for (const diff of DIFFS) row(`hunted from 9 m, run 5 s, then ${plan}`, diff, rate(8, (def, k) => {
   const s = make(def, 900 + k, diff), st = s.stalker, p = s.player;
   [p.x, p.z] = openSpot(s, rng(k * 3 + 11)); st.wake(p);
   const f = s.nav.field(p.x, p.z);
@@ -72,11 +73,12 @@ if (on('escape')) for (const plan of ['freeze', 'sneak', 'rhythm', 'hide']) for 
   const away = s.nav.field(st.x, st.z);
   let gx = p.x, gz = p.z, gd = -1;
   for (let i = 0; i < s.playerNav.n; i++) if (s.playerNav.walk[i] && isFinite(away[i]) && away[i] > gd && Math.hypot(s.nav.cx(i) - p.x, s.nav.cz(i) - p.z) < 25) { gd = away[i]; gx = s.nav.cx(i); gz = s.nav.cz(i); }
-  if (plan === 'hide') { const h = s.L.hides.slice().sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0]; gx = h.x; gz = h.z; }
+  const hiding = plan.startsWith('hide');
+  if (hiding) { const h = s.L.hides.slice().sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0]; gx = h.x; gz = h.z; }
   const memo = {i: 0};
   play(s, 45, t => {
     const it = intent(), run = t < 5, there = Math.hypot(p.x - gx, p.z - gz) < 0.5;
-    if (plan === 'hide') { memo.sneak = !run; if (!there) steer(s, it, gx, gz, memo); else if (!p.crouched) it.crouch = true; it.sprint = run; }
+    if (hiding) { memo.sneak = !run; if (!there) steer(s, it, gx, gz, memo); else if (!p.crouched) it.crouch = true; it.sprint = run; }
     else if (run) { steer(s, it, gx, gz, memo); it.sprint = true; }
     else if (plan === 'sneak' && !there) { memo.sneak = true; steer(s, it, gx, gz, memo); }
     else if (plan === 'rhythm' && !there) {
@@ -84,6 +86,36 @@ if (on('escape')) for (const plan of ['freeze', 'sneak', 'rhythm', 'hide']) for 
       const listening = st.pulseIn >= 0 || (st.state === 'hunt' && st.burst === 'click') || st.state === 'listen' || st.state === 'search';
       if (!listening) steer(s, it, gx, gz, memo); else if (!p.crouched) it.crouch = true;
     }
+    // it is close and listening: don't breathe (and let go before you run out, to gasp in private)
+    if (plan.endsWith('hold') && !run && s.lungs > 0.15 && st.euclid < 9) it.holdBreath = true;
+    return it;
+  });
+  return s.state !== 'play';
+}));
+
+// hunted, you run, then throw a stone away down the room and sneak off the other way. 'first' is a creature
+// that has never seen a stone; 'used' has seen enough of them to work them out.
+if (on('stone')) for (const plan of ['first', 'used']) for (const diff of DIFFS) row(`hunted, run 3 s, stone thrown (${plan}), sneak off`, diff, rate(8, (def, k) => {
+  const s = make(def, 1100 + k, diff), st = s.stalker, p = s.player;
+  [p.x, p.z] = openSpot(s, rng(k * 3 + 17)); st.wake(p);
+  const f = s.nav.field(p.x, p.z);
+  let bi = -1, bd = 1e9;
+  for (let i = 0; i < s.nav.n; i++) if (s.nav.walk[i] && Math.abs(f[i] - 12) < bd) { bd = Math.abs(f[i] - 12); bi = i; }
+  st.x = s.nav.cx(bi); st.z = s.nav.cz(bi); st.notice(p.x, p.z, 0);
+  if (plan === 'used') st.decoys = 99;
+  const away = s.nav.field(st.x, st.z);
+  let gx = p.x, gz = p.z, gd = -1;
+  for (let i = 0; i < s.playerNav.n; i++) if (s.playerNav.walk[i] && isFinite(away[i]) && away[i] > gd) { gd = away[i]; gx = s.nav.cx(i); gz = s.nav.cz(i); }
+  const memo = {i: 0};
+  let thrown = false;
+  play(s, 30, t => {
+    const it = intent();
+    if (t >= 3 && !thrown) { // over the creature's shoulder, along whichever way has the most room
+      thrown = true; it.throwStone = true; p.yaw = Math.atan2(st.x - p.x, -(st.z - p.z)) + 0.9; p.pitch = 0.1; return it;
+    }
+    memo.sneak = t >= 3;
+    if (t < 3) it.sprint = true;
+    steer(s, it, gx, gz, memo);
     return it;
   });
   return s.state !== 'play';

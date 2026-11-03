@@ -1,5 +1,5 @@
-// Level 4, the last one. Four cores spread across a wide level, the creature awake from the start,
-// and a long run to the lift in the far north-east corner once it knows where you are.
+// Level 4. Four cores spread across a wide level, the creature awake from the start, and a long run
+// to the lift in the far north-east corner once it knows where you are. The lift goes to level 5.
 
 import {box, cyl, sph} from '../world/shapes.js';
 
@@ -63,8 +63,10 @@ export default {
   notes: [
     {x: 9.5, z: 36.5, title: 'Operator log, day 9',
       text: 'The lift still works. I heard it run once, the whole cage rattling up the shaft. It is in the north-east corner, behind the amber door.\n\nThe door wants four cores.'},
-    {x: 30.2, z: 25.7, title: 'Operator log, last',
+    {x: 29.4, z: 25.7, title: 'Operator log, last',
       text: 'I could not get the fourth core. It was standing over it.\n\nIf you are reading this: it follows the hum. Let go of the trigger and let it walk past. If your steps sound doubled, it is behind you. Stand still until the clicking stops, or turn and give it the light.'},
+    {x: 13.6, z: 16.8, title: 'Operator log, day 8',
+      text: 'It goes to where a stone lands. I have got past it twice that way, throwing over its head.\n\nThe second time it stopped halfway and turned back toward me before it went. I do not think there is a third.'},
   ],
   decals: [
     {x: 20, y: 1.6, z: 32, face: 's', w: 5.6, h: 1.1, text: 'THE LIFT STILL WORKS'},
@@ -78,12 +80,15 @@ export default {
     {x: 19, z: 21, r: 1.5, cores: 2, actions: [['silence', 3], ['behind', 2.4]]},
     {x: 40, z: 20, r: 4, actions: [['whisper', 48, 26]]},
     {x: 24, z: 4, r: 3, actions: [['steps', 14, 1, 34, 1, 12]]},
-    {x: 22, z: 4, r: 4, cores: 3, delay: 0.5, actions: [['slam', 'gallery-west'], ['say', 'The door behind you slams.', 3500]]},
+    {x: 22, z: 4, r: 4, cores: 3, delay: 0.5, actions: [['slam', 'gallery-west', 'The door behind you slams.', 3500]]},
     {x: 24, z: 30, r: 2, cores: 1, actions: [['statue', 15.2, 34.4, Math.PI / 2, 0]]},
+    // the operator's colour, fresh, coming through the door from the next room. They left here long ago.
+    {x: 33, z: 35, r: 1.8, cores: 3, look: [40, 35], actions: [['phantom', 46, 35, 41, 35, 2.6]]},
   ],
+  tune: {hearing: 1.1, sonar: 1.1},
   stalker: {
     spawn: [40, 20], wake: 'start',
-    patrol: [[4, 4], [24, 4.5], [42, 5], [9, 20], [24, 16], [24, 26], [40, 26], [6, 36], [24, 36.5], [44, 36]],
+    patrol: [[4, 4], [24, 4.5], [42, 5], [9, 20], [24, 16], [26.5, 26.5], [40, 26], [6, 36], [24, 36.5], [44, 36]],
   },
-  ending: 'The lift climbs for a long time. Nothing follows. You keep the scanner off the whole way up.',
+  ending: 'The amber door shuts behind you and the cage starts to move. You keep the scanner off. It is a long time before you are sure: you are going down.',
 };

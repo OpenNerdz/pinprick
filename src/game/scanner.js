@@ -65,7 +65,7 @@ export class Scanner {
       if (this.heat > 0.8 && (this.warnT -= dt) <= 0) { this.warnT = 0.7 - (this.heat - 0.8) * 1.5; sounds.heatWarn(); }
       if (this.heat >= 1) {
         this.overheated = true; sounds.overheat(); buzz([40, 30, 40]);
-        ctx.noise(ctx.x, ctx.z, NOISE.overheat, false);
+        ctx.noise(ctx.x, ctx.z, NOISE.overheat, false, 'scan');
       }
     } else if ((this.coolWait -= dt) <= 0) {
       this.heat = Math.max(0, this.heat - SCANNER.coolRate * dt);
@@ -84,7 +84,7 @@ export class Scanner {
       if (this.sonCore && this.coreBell <= 0) { this.coreBell = 0.5; sounds.coreBell(); }
       if ((this.noiseT -= dt) <= 0) {
         this.noiseT = 0.5;
-        ctx.noise(ctx.x, ctx.z, NOISE.scanMin + (NOISE.scanMax - NOISE.scanMin) * this.charge, false);
+        ctx.noise(ctx.x, ctx.z, NOISE.scanMin + (NOISE.scanMax - NOISE.scanMin) * this.charge, false, 'scan');
       }
     } else this.noiseT = 0;
 
@@ -152,7 +152,7 @@ export class Scanner {
     this.cols = Math.max(8, Math.ceil(w / sp)); this.rows = Math.max(8, Math.ceil(h / sp));
     this.sweepP = 0; this.sweepRow = 0; this.cooldown = SCANNER.sweepCooldown; this.sweepBell = 0;
     ctx.sounds.sweep(SCANNER.sweepTime);
-    ctx.noise(ctx.x, ctx.z, NOISE.sweep, true);
+    ctx.noise(ctx.x, ctx.z, NOISE.sweep, true, 'sweep');
     buzz(15);
     return true;
   }

@@ -33,24 +33,73 @@
 //   stalk   Having lost you, it may follow your footsteps instead, a dozen metres back, stepping only
 //           when you step so its feet hide in yours: your steps sound doubled. Each step it closes in,
 //           and at arm's length it pounces. Stop, turn the beam on it, and it bolts into the dark.
+// Behind all that, it thinks. It keeps a map of where you might be (belief.js) that sounds sharpen and empty
+// echoes wear away, chooses where to go next by weighing that map against what it has already checked
+// (planner.js), remembers your habits between runs (memory.js), and is paced by a director that knows
+// where you are but never tells it (director.js). From that come its other tricks:
+//   cut off  seeing which way you are running, it goes for the door you are running to
+//   flank    having been pinned in your light, it comes in through the other way
+//   feint    giving up a search, it walks away loudly, then comes back in silence and waits
+//   waylay   it stands silent in a chokepoint, where the tracker cannot see it, for your steps to come near
+//   recheck  an empty click may be followed by a second one, for those who move again too soon
+//   lean in  beside you it leans closer. Hold your breath and it decides sooner that it heard nothing
 // And it learns your motion tracker. It hears the tick up close. On Normal and Hard the first tick
 // may make it go silent and still, which hides it from the tracker, and then it comes to look where
 // the tick came from; keep ticking at it and it works out where you are. It may copy the tick, too.
 
-import {NOISE, STALKER, TRACKER} from '../config.js';
+import {NOISE, STALKER, TRACKER, LUNGS} from '../config.js';
 import {clamp, angleDiff} from '../util/math.js';
 import {cast, hit} from '../world/raycast.js';
+import {Topology} from '../world/topology.js';
 import {makeCreature, animateCreature, headOf} from './figures.js';
+import {Belief} from './belief.js';
+import {Memory} from './memory.js';
+import {Director} from './director.js';
+import {Planner} from './planner.js';
 import {buzz} from '../ui/haptics.js';
 
 const MIMICS = ['trigger', 'ping', 'chime', 'steps'];
 const MIMICS_TRACKER = [...MIMICS, 'tracker'];
 
 export class Stalker {
-  /** `pnav` is the player's walkability grid (same cells as `nav`), used to find the ends of crawls. */
-  constructor(cfg, world, nav, diff, rand, sounds, pnav = null) {
+  /**
+   * `pnav` is the player's walkability grid (same cells as `nav`), used to find the ends of crawls.
+   * `brain`: {memory (what it knows about you), rand (its own random stream), hides (the level's hiding spots),
+   *          exit (where the level's way out is)}.
+   */
+  constructor(cfg, world, nav, diff, rand, sounds, pnav = null, brain = {}) {
     this.cfg = cfg;
     this.world = world; this.nav = nav; this.diff = diff; this.rand = rand; this.sounds = sounds; this.pnav = pnav;
+    this.brainRand = brain.rand || rand;
+    this.memory = brain.memory || new Memory();
+    this.hides = brain.hides || []; this.exit = brain.exit || null;
+    this.topo = new Topology(world, nav);
+    this.belief = new Belief(pnav || nav, nav);
+    this.director = new Director(diff, this.brainRand);
+    // every creature is a little different: how long it dashes, how long it keeps at something, how it wanders
+    const r = this.brainRand;
+    this.temper = {bold: 0.88 + r() * 0.24, patient: 0.8 + r() * 0.4, curious: r()};
+    this.arousal = 0;                     // 0 calm .. 1 it has just been chasing you
+    this.goal = null;                     // what sort of place it is walking to: patrol, room, choke, hide
+    this.waylaying = false;               // standing silent somewhere on purpose
+    this.clue = null; this.heardKind = 'walk'; // what gave you away, for the Caught screen
+    this.absorbT = -99;
+    this.stoneAt = -99; this.decoys = 0;  // thrown stones it has heard, and fallen for
+    // how many it will fall for: fewer if it has met your stones before
+    this.stoneTrust = Math.max(0, diff.stoneTrust - Math.round(this.memory.weight('stone') * diff.adapt * 2));
+    this.exposed = false;                 // it has heard your breath right beside it: a hiding spot will not save you
+    this.cutoff = null;                   // the door it is running to, ahead of you
+    this.doubled = false;                 // has it clicked twice this time?
+    this.pinnedAt = -999;                 // when it last felt your light hold it
+    this.feintPhase = 'away'; this.feintBack = {x: 0, z: 0}; this.feintAfter = 0;
+    this.lingerFor = 0; this.lingerKnown = false; this.breathT = 0; this.sniffed = false;
+    this.stoodAt = null;                  // where it last stood over someone it could not quite find
+    this.guessing = false;                // searching on a hunch, not because it ever had you
+    this.blocked = 0;                     // times in a row every way on has led past you
+    this.hideNoted = false; this.closeAt = -99;
+    this.masking = 0;                     // 0..1: how much a machine nearby is drowning out what it hears
+    this.now = 0;
+    this.planner = null;                  // needs the fields below, so it is made at the end
     this.actor = makeCreature();
     world.actors.push(this.actor);
     this.field = new Float32Array(nav.n);
@@ -75,13 +124,15 @@ export class Stalker {
     this.dots = null;                     // the session's dot buffer, for the red sonar dots
     this.sonarT = this.span(STALKER.sonarWalking); this.pulseIn = -1;
     this.lastLit = -99; this.pinned = false; this.pinScream = -99; this.surgeT = 0; this.pinFor = 0;
-    this.burnT = 0; this.burnNeed = diff.burn; // it gets used to the light, so this grows each time it runs
+    // it gets used to the light, so this grows each time it runs, and with what it remembers of your light
+    this.burnT = 0; this.burnNeed = diff.burn + diff.burnLearn * this.memory.weight('beam') * diff.adapt;
     this.followD = STALKER.followFar; this.stalkAfter = 0; this.echoT = -1; this.echoes = 0; this.tense = 0;
     this.graceFor = 0; this.avoid = null;  // after a respawn: keep away from where you came back
     this.pings = 0; this.pingAt = -99; this.pingX = 0; this.pingZ = 0; // your tracker's ticks it has heard
     this.heardPing = false; this.afterPing = false;
     this.echoRays = 0;                    // red sonar rays still to paint
-    this.events = [];                     // for the session: 'windup', 'sonar', 'found', 'pinned', 'echo', 'flee'
+    this.events = [];                     // for the session: 'windup', 'sonar', 'found', 'pinned', 'echo', 'flee', ...
+    this.planner = new Planner(this);
   }
 
   span([a, b]) { return a + this.rand() * (b - a); }
@@ -90,20 +141,36 @@ export class Stalker {
   get calm() { return this.state === 'patrol' || this.state === 'investigate' || this.state === 'listen' || this.state === 'wait'; }
   /** States in which it clicks: walking about, standing to listen, searching, lingering beside you. */
   get sonarOn() { return this.calm && this.state !== 'wait' || this.state === 'search' || this.state === 'linger'; }
+  /**
+   * States in which it must not blunder into someone keeping still: it does not know you are there. Searching,
+   * that depends. Still standing where it last placed you, it walks right into you; moved since then and gone
+   * still, it stops beside you and leans in (on Hard it just keeps walking).
+   */
+  get unaware() {
+    if (this.calm || (this.state === 'feint' && this.feintPhase === 'back')) return true;
+    if (this.state !== 'search') return false;
+    if (this.guessing) return true; // it has no idea, it is only looking
+    if (this.diff.searchBump || !this.player) return false;
+    return Math.hypot(this.player.x - this.lastKnown.x, this.player.z - this.lastKnown.z) > STALKER.movedAway;
+  }
+  get dashLen() { return this.diff.dashTime * this.temper.bold; }
 
   /**
-   * Spawn. With `awayFrom`, appear at the patrol point that is the longest walk from that spot; with
-   * `exit` as well, the one farthest from both, so a chase to the exit starts behind you.
+   * Spawn. With `awayFrom`, appear somewhere that is a long walk from that spot and from the `goals` you are
+   * likely to head for next; with `exit` as well, the patrol point farthest from both, so a chase to the
+   * exit starts behind you.
    */
-  wake(awayFrom = null, state = 'patrol', exit = null) {
+  wake(awayFrom = null, state = 'patrol', exit = null, goals = []) {
     let [x, z] = this.cfg.spawn;
-    if (awayFrom) [x, z] = exit ? this.finaleSpot(awayFrom, exit) : this.farthestPatrol(awayFrom.x, awayFrom.z);
+    if (awayFrom) [x, z] = exit ? this.finaleSpot(awayFrom, exit) : this.farthestPatrol(awayFrom.x, awayFrom.z, goals);
     this.x = x; this.z = z;
     this.actor.on = true;
     this.state = state;
     this.target = null; this.path = null; this.repathT = 0; this.sinceFix = 99; this.light = 0; this.exposure = 0;
-    this.stuck = 0; this.lungeT = 0; this.stumbleT = 0; this.timer = 0;
+    this.stuck = 0; this.lungeT = 0; this.stumbleT = 0; this.timer = 0; this.recoilT = 0; this.tense = 0;
     this.pulseIn = -1; this.pinned = false; this.surgeT = 0; this.pinFor = 0; this.burnT = 0; this.echoT = -1; this.followD = STALKER.followFar;
+    this.echoRays = 0; this.afterPing = false; this.waylaying = false; this.cutoff = null; this.doubled = false; this.arousal = 0;
+    this.belief.uniform();
     this.prevHits = this.actor.hits;
     this.nav.field(this.x, this.z, this.field);
     this.playerDist = awayFrom ? this.nav.distAt(this.field, awayFrom.x, awayFrom.z, 2.5) : Infinity;
@@ -113,14 +180,24 @@ export class Stalker {
 
   sleep() { this.state = 'dormant'; this.actor.on = false; this.sounds.setBreath(0, this.x, this.z); }
 
-  farthestPatrol(x, z) {
+  /**
+   * A place to appear: as far as possible from you and from wherever you are off to next, so that coming back
+   * does not simply put it in the room you are heading for. Not always the same place, either.
+   */
+  farthestPatrol(x, z, goals = []) {
     const f = this.nav.field(x, z, this.tmpField);
-    let best = this.cfg.spawn, bd = -1;
-    for (const p of [this.cfg.spawn, ...this.cfg.patrol]) {
-      const d = this.nav.distAt(f, p[0], p[1]);
-      if (isFinite(d) && d > bd) { bd = d; best = p; }
+    const scored = [];
+    let top = -1;
+    const rooms = this.planner.spots.filter(q => q.kind === 'room').map(q => [q.x, q.z]);
+    for (const p of [this.cfg.spawn, ...this.cfg.patrol, ...rooms]) {
+      let d = this.nav.distAt(f, p[0], p[1]);
+      if (!isFinite(d) || !this.nav.walkableAt(p[0], p[1])) continue;
+      for (const g of goals) d = Math.min(d, Math.hypot(p[0] - g.x, p[1] - g.z) * 1.3);
+      scored.push([d, p]);
+      if (d > top) top = d;
     }
-    return best;
+    const good = scored.filter(q => q[0] >= top * 0.7);
+    return good.length ? good[Math.floor(this.brainRand() * good.length)][1] : this.cfg.spawn;
   }
 
   /**
@@ -130,7 +207,8 @@ export class Stalker {
   fleeSpot(x, z) {
     const fp = this.nav.field(x, z, this.tmpField), fc = this.nav.field(this.x, this.z, this.tmpField2);
     let best = null, bd = -1, side = this.cfg.spawn, bs = -Infinity;
-    for (const q of [this.cfg.spawn, ...this.cfg.patrol]) {
+    const places = [this.cfg.spawn, ...this.cfg.patrol, ...this.planner.spots.map(s => [s.x, s.z])];
+    for (const q of places) {
       const dp = this.nav.distAt(fp, q[0], q[1]), dc = this.nav.distAt(fc, q[0], q[1]);
       if (!isFinite(dp) || !isFinite(dc)) continue;
       if (dp - dc > 4 && dp > bd) { bd = dp; best = q; }
@@ -159,17 +237,30 @@ export class Stalker {
     if (state === 'listen') { this.timer = this.span(STALKER.listenTime); this.sonarT = Math.min(this.sonarT, 0.4 + this.rand() * 0.6); }
     if (state === 'wait') this.timer = this.span(STALKER.waitTime);
     if (state === 'alert') this.timer = this.diff.alertTime;
-    if (state === 'hunt') { this.burst = 'dash'; this.burstT = this.diff.dashTime; this.emptyClicks = 0; }
+    if (state === 'hunt') { this.burst = 'dash'; this.burstT = this.dashLen; this.emptyClicks = 0; this.doubled = false; this.cutoff = this.cutoffSpot(); }
     if (state === 'search') {
       const g = this.guess();
       this.searchC.x = g.x; this.searchC.z = g.z;
-      this.searchLeft = this.diff.searchPoints;
+      this.belief.observe(g.x, g.z, 2 + Math.min(6, this.sinceFix), 0.8);
+      this.searchLeft = Math.max(1, Math.round(this.diff.searchPoints * this.temper.patient));
+      if (this.director.relaxing) this.searchLeft = 1;
       const amb = this.ambushSpot();
       this.ambushing = !!amb;
-      this.target = amb || {x: g.x, z: g.z};
+      this.target = amb || this.rememberedHide(g) || {x: g.x, z: g.z};
       this.timer = 0;
     }
-    if (state === 'linger') { this.timer = this.span(STALKER.lingerTime); this.sonarT = 0.8; this.sounds.exhale(this.x, this.z); }
+    if (state === 'linger') {
+      this.timer = this.span(STALKER.lingerTime); this.sonarT = 0.8; this.sounds.exhale(this.x, this.z);
+      this.lingerFor = 0; this.breathT = 0; this.sniffed = false;
+    }
+    if (state === 'flank') this.timer = STALKER.flankTimeout;
+    if (state === 'feint') {
+      // off it goes, making sure you hear it: the far end of the level from where it lost you
+      this.feintPhase = 'away'; this.feintAfter = T + STALKER.feintEvery; this.timer = this.span(STALKER.feintAway);
+      this.feintBack.x = this.searchC.x; this.feintBack.z = this.searchC.z;
+      this.target = this.farSpot(this.feintBack);
+      this.events.push('feint');
+    }
     if (state === 'finale') { this.timer = 0; this.sounds.shriek(this.x, this.z, this.muffle()); }
     if (state === 'stalk') { this.followD = Math.max(STALKER.followFar, Math.min(this.playerDist, 16)); this.echoes = 0; this.tense = 0; }
     if (state === 'flee') {
@@ -180,8 +271,12 @@ export class Stalker {
       this.stalkAfter = T + STALKER.stalkCooldown;
       this.sounds.shriek(this.x, this.z, Math.max(0.25, this.muffle()), 0.1);
       this.events.push('flee');
+      this.director.rest(STALKER.fleeRest);
+      this.pinnedAt = T;
     }
     if (state !== 'wait' && state !== 'listen') this.afterPing = false; // anything else, and it has moved on
+    if (state !== 'wait') this.waylaying = false;
+    if (state !== 'alert' && state !== 'hunt') this.exposed = false;
     // a click burst in progress is cut off by anything but more listening
     if (!(state === 'patrol' || state === 'investigate' || state === 'listen' || state === 'search' || state === 'linger')) this.pulseIn = -1;
     this.state = state;
@@ -199,7 +294,8 @@ export class Stalker {
       this.fixVel.x += (vx - this.fixVel.x) * k; this.fixVel.z += (vz - this.fixVel.z) * k;
     } else if (gap >= 3) { this.fixVel.x = 0; this.fixVel.z = 0; }
     if (gap > 0) this.fixT = T;
-    this.lastKnown.x = x; this.lastKnown.z = z; this.sinceFix = 0;
+    this.lastKnown.x = x; this.lastKnown.z = z; this.sinceFix = 0; this.guessing = false;
+    this.arousal = Math.min(1, this.arousal + 0.25);
     this.fixFrom.x = this.x; this.fixFrom.z = this.z; // where it stood: the near side of wherever you went
   }
 
@@ -221,13 +317,194 @@ export class Stalker {
   }
 
   /** It has noticed you: freeze, turn, then come. */
-  notice(x, z, T) {
+  notice(x, z, T, why = null) {
     this.fix(x, z, T);
-    if (!this.hunting && this.state !== 'alert') this.enter('alert', T);
+    this.belief.place(x, z, 1.5);
+    this.clue = why || this.heardKind;
+    if (!this.hunting && this.state !== 'alert' && this.state !== 'flank') this.enter('alert', T); // already on its way round: it keeps going
   }
 
   /** Whether, having lost you, it follows your footsteps this time (difficulty, and not right after a respawn). */
-  wantsStalk(T) { return T > this.stalkAfter && this.graceFor <= 0 && this.rand() < this.diff.stalk; }
+  wantsStalk(T) { return T > this.stalkAfter && this.graceFor <= 0 && !this.director.relaxing && this.rand() < this.diff.stalk; }
+
+  /** A door has come down, or the ground has changed: if it was standing there, it is now just to one side. */
+  regrid() {
+    if (!this.active || this.nav.walkableAt(this.x, this.z)) return;
+    const at = this.nav.nearest(this.x, this.z, 4);
+    if (at >= 0) { this.x = this.nav.cx(at); this.z = this.nav.cz(at); this.repathT = 0; }
+  }
+
+  /** The longest it listens when it means it: a breath held from the start can always be let go quietly afterwards. */
+  get holdable() { return this.diff.lungs * STALKER.holdRate * (1 - LUNGS.shaky) * 0.85; }
+
+  /** Has it stood over this very spot not long ago? Then it suspects, and listens for your breath. */
+  suspects(player, T) {
+    const s = this.stoodAt;
+    return !!(this.diff.suspect && s && T - s.T < STALKER.suspectFor && Math.hypot(player.x - s.x, player.z - s.z) < STALKER.suspectR);
+  }
+
+  /** Whether, giving up a search, it pretends to leave. */
+  wantsFeint(T) {
+    return T > this.feintAfter && this.graceFor <= 0 && !this.director.relaxing && this.brainRand() < this.diff.feint;
+  }
+
+  /** The director says you have had enough for now: it loses interest in whatever it was doing. */
+  leaveOff() {
+    if (this.state === 'stalk') { this.target = null; this.enter('patrol', this.now); }
+    if (this.state === 'search') this.searchLeft = 1;
+    if (this.waylaying) this.timer = Math.min(this.timer, 1);
+  }
+
+  /** The director's vague nudge: it has a feeling about that part of the level. Never exact. */
+  hunch(x, z, sigma) { this.belief.observe(x, z, sigma, 0.75); }
+
+  /** Having been pinned in your light lately and now coming back: whether to come in by another way. */
+  wantsFlank(T) {
+    if (!this.diff.flank || T - this.pinnedAt > STALKER.flankMemory || this.playerDist < 10) return false;
+    if (this.brainRand() > this.diff.flank * (0.6 + 0.8 * this.memory.weight('beam') * this.diff.adapt)) return false;
+    const spot = this.flankSpot();
+    if (!spot) return false;
+    this.target = spot;
+    return true;
+  }
+
+  /** The way into your room that is not the obvious one, so long as the walk there does not pass you. */
+  flankSpot() {
+    const L = this.lastKnown, room = this.topo.roomAt(L.x, L.z);
+    if (!room) return null;
+    const ways = [];
+    for (const e of this.topo.exits(room)) {
+      const d = this.nav.distAt(this.field, e.x, e.z, 1.5);
+      if (isFinite(d)) ways.push({x: e.x, z: e.z, d});
+    }
+    if (ways.length < 2) return null;
+    ways.sort((a, b) => a.d - b.d);
+    for (let i = 1; i < ways.length; i++) {
+      if (ways[i].d < ways[0].d + 40 && this.routeClear([ways[i].x, ways[i].z], L, 5)) return {x: ways[i].x, z: ways[i].z};
+    }
+    return null;
+  }
+
+  /** If you are running for a door it can reach before you, that door. Asked at the start of each dash. */
+  cutoffSpot() {
+    const {diff} = this;
+    if (!diff.intercept || this.sinceFix > 1.5) return null;
+    if (this.brainRand() > diff.intercept * (0.6 + 0.8 * this.memory.weight('run') * diff.adapt)) return null;
+    const L = this.lastKnown, v = this.fixVel, sp = Math.hypot(v.x, v.z), room = this.topo.roomAt(L.x, L.z);
+    if (sp < 1.8 || !room) return null;
+    let best = null, soonest = Infinity;
+    for (const e of this.topo.exits(room)) {
+      const ex = e.x - L.x, ez = e.z - L.z, d = Math.hypot(ex, ez);
+      if (d < 2 || (ex * v.x + ez * v.z) / (d * sp) < 0.75) continue; // not the way you are heading
+      const you = d / sp, it = this.nav.distAt(this.field, e.x, e.z, 1.5) / (STALKER.dash * diff.speed);
+      if (it < you + 0.4 && you < soonest) { soonest = you; best = {x: e.x, z: e.z}; }
+    }
+    return best;
+  }
+
+  /**
+   * On your way to the exit, the first place it can reach before you do, as {x, z}; null if there is none.
+   * A loop or a crawl is how you get round it.
+   */
+  headOff(player) {
+    const P = this.pnav, E = this.exit;
+    if (!P || !E || P.n !== this.nav.n) return null;
+    const path = P.path(P.field(E.x, E.z, this.tmpField), player.x, player.z, 2);
+    if (!path) return null;
+    const pace = STALKER.finale * this.diff.speed, you = 3.2;
+    // the path runs from the exit to you, so walk it backwards: half a metre a cell, and a little for corners
+    for (let i = path.length - 1, walked = 0; i >= 0; i -= 4, walked += 2.2) {
+      if (walked < 6) continue;  // not right on top of you: that is what following is for
+      const it = this.field[path[i]];
+      if (isFinite(it) && it / pace < walked / you) return {x: P.cx(path[i]), z: P.cz(path[i])};
+    }
+    return null;
+  }
+
+  /** The place farthest from `from` that it can walk to from here. `from` may be in a crawl it cannot enter. */
+  farSpot(from) {
+    let best = null, bd = -1;
+    for (const s of this.planner.spots) {
+      const d = Math.hypot(s.x - from.x, s.z - from.z), here = this.nav.distAt(this.field, s.x, s.z, 0.6);
+      if (isFinite(here) && here > 4 && d > bd) { bd = d; best = s; }
+    }
+    return best ? {x: best.x, z: best.z} : {x: this.x, z: this.z};
+  }
+
+  /** A hiding place near (g) that it has caught you using before: it goes there first. */
+  rememberedHide(g) {
+    let best = null, most = 0;
+    for (const s of this.planner.spots) {
+      if (s.kind !== 'hide') continue;
+      const n = this.memory.hideCount(s.i);
+      if (n < this.diff.hideMemory || n <= most || Math.hypot(s.x - g.x, s.z - g.z) > 18) continue;
+      if (isFinite(this.nav.distAt(this.field, s.x, s.z, 0.6))) { most = n; best = {x: s.x, z: s.z}; }
+    }
+    return best;
+  }
+
+  /** You have just gone to ground with it after you: it takes note of where. */
+  noteHiding(player) {
+    if (!player.hidden) { this.hideNoted = false; return; }
+    if (this.hideNoted || !(this.hunting || this.state === 'alert' || this.state === 'search' || this.state === 'linger' || this.sinceFix < 6)) return;
+    this.hideNoted = true;
+    let at = -1, bd = Infinity;
+    this.hides.forEach((h, i) => { const d = Math.hypot(player.x - h.x, player.z - h.z); if (d < bd) { bd = d; at = i; } });
+    if (at >= 0 && this.memory.hideUsed(at)) this.learned('hide');
+    this.events.push('hid');
+  }
+
+  /** It has just worked something out about you. */
+  learned(habit) {
+    this.events.push('learned:' + habit);
+    if (this.playerDist < 30) this.sounds.chitter(this.x, this.z, this.muffle());
+  }
+
+  /** A sound reaches it: what it does to the map of where you might be, and to its memory of you. */
+  absorb(n, d, T) {
+    const run = n.kind === 'step' && n.loud >= NOISE.sprintStep;
+    this.heardKind = run ? 'run' : n.kind === 'step' ? (n.loud <= NOISE.crouchStep ? 'creep' : 'walk') : n.kind;
+    this.memory.heard(n.x, n.z, n.kind === 'step' ? 1 : 2);
+    if (run && (this.state === 'hunt' || this.state === 'alert') && this.memory.note('run', 0.3)) this.learned('run');
+    if (T - this.absorbT < 0.12 && !n.exact) return; // the scanner's hum is continuous; one reading will do
+    this.absorbT = T;
+    // it hears where a sound is only roughly, worse from further away; several readings average that out
+    const r = this.brainRand, err = Math.max(0.4, d * 0.1);
+    this.belief.observe(n.x + (r() + r() - 1) * err, n.z + (r() + r() - 1) * err, Math.max(1, d * 0.14), n.exact ? 0.995 : 0.97);
+  }
+
+  /**
+   * A stone landing. For a while it comes running. Then it has fallen for that too often: it knows nobody is
+   * there, and that whoever threw it cannot be far, and it goes looking for them instead.
+   */
+  hearStone(n, T) {
+    if (T - this.stoneAt < 1.5) return; // the later bounces of the same stone
+    this.stoneAt = T;
+    const fights = this.state === 'hunt' || this.state === 'alert' || this.state === 'flank';
+    if (this.decoys < this.stoneTrust) {
+      this.decoys++;
+      if (this.memory.note('stone')) this.learned('stone');
+      this.belief.observe(n.x, n.z, 2, 0.9);
+      this.heardKind = 'stone';
+      if (fights) { this.fix(n.x, n.z, T); this.fixVel.x = 0; this.fixVel.z = 0; this.cutoff = null; return; }
+      const r = this.brainRand;
+      this.target = {x: n.x + (r() - 0.5) * 2, z: n.z + (r() - 0.5) * 2};
+      this.enter('investigate', T);
+      return;
+    }
+    this.memory.note('stone', 0.5);
+    this.events.push('wise');
+    this.sounds.chitter(this.x, this.z, this.muffle());
+    if (fights) return; // it does not even turn its head
+    this.belief.touch(n.x, n.z, 3, 0.1);
+    this.belief.observe(n.x, n.z, 11, 0.7);
+    const b = this.belief.best(this.field, {min: 2, D: 25});
+    if (b) {
+      this.lastKnown.x = b.x; this.lastKnown.z = b.z; this.fixVel.x = 0; this.fixVel.z = 0; this.sinceFix = 3;
+      this.guessing = true;
+      this.enter('search', T);
+    }
+  }
 
   /** Start a click burst: you hear it now; the echo (red dots, and whether it finds you) comes a moment later. */
   click(T) {
@@ -257,21 +534,40 @@ export class Stalker {
     if (this.dots && this.euclid < 32) this.echoRays = STALKER.sonarRays;
     // you, inside the echo: in reach and nothing solid between you
     const dx = player.x - hx, dy = player.eye - 0.35 - hy, dz = player.z - hz, d = Math.hypot(dx, dy, dz);
-    if (d > R || cast(this.world, hx, hy, hz, dx / d, dy / d, dz / d, Math.max(0, d - 0.2), false)) return;
-    this.events.push('sonar');
-    const moving = player.still < 0.25 && !(this.diff.sonarCrouch && player.crouched);
-    if (moving && !player.hidden) { this.events.push('found'); this.notice(player.x, player.z, T); }
+    const inside = d <= R && !cast(this.world, hx, hy, hz, dx / d, dy / d, dz / d, Math.max(0, d - 0.2), false);
+    if (inside) {
+      this.events.push('sonar');
+      const moving = player.still < 0.25 && !(this.diff.sonarCrouch && player.crouched);
+      if (moving && !player.hidden) { this.events.push('found'); this.notice(player.x, player.z, T, 'echo'); return; }
+      // it sees you do it, in a way: something was here a moment ago, and now nothing moves
+      if (this.state === 'hunt' && this.memory.note('freeze', 0.5)) this.learned('freeze');
+    }
+    // nothing moved in the echo. You may be keeping still, so that only lowers the odds around it
+    // (measured from its body, not its head: what it concludes must not hang on how its head happens to be cocked)
+    const ox = this.x, oz = this.z;
+    this.belief.scan(ox, 1.4, oz, R, 0.55, (ex, ey, ez, far) => cast(this.world, ox, 1.4, oz, ex, ey, ez, Math.max(0, far - 0.2), false));
   }
 
   /** Report noises made this frame: [{x, z, loud, exact, kind}]. */
   hear(noises, T) {
     if (!this.active || this.state === 'finale' || this.state === 'flee') return;
-    // standing still and listening, it hears further; following your footsteps, further still
-    const ears = this.diff.hearing * (this.ears ? this.diff.listen : 1) * (this.state === 'stalk' ? 2 : 1);
+    // standing still and listening, it hears further; following your footsteps, further still; flat out,
+    // its own feet cover some of it. A machine running nearby drowns out everything but the loudest sounds.
+    const ears = this.diff.hearing * (this.ears ? this.diff.listen : 1) * (this.state === 'stalk' ? 2 : 1)
+      * (this.state === 'hunt' && this.burst === 'dash' ? STALKER.dashDeaf : 1);
     for (const n of noises) {
-      const loud = n.loud * ears, d = this.nav.distAt(this.field, n.x, n.z, 2.5);
+      const loud = n.loud * ears * (n.exact ? 1 : 1 - STALKER.maskDrop * this.masking), d = this.nav.distAt(this.field, n.x, n.z, 2.5);
       if (!(d <= loud)) continue;
       this.heardYou = true;
+      if (n.kind === 'stone') { this.hearStone(n, T); continue; }
+      this.absorb(n, d, T);
+      // your breath, right beside it: it knows exactly where you are, hiding or not
+      if (n.kind === 'breath' && this.state === 'linger') this.exposed = true;
+      if (this.waylaying) {
+        // standing silent on purpose: it lets you come, and lets you come
+        if (d < STALKER.waylayPounce * this.diff.hearing || n.exact) this.notice(n.x, n.z, T);
+        continue;
+      }
       if (this.state === 'stalk') {
         // a footstep: it steps with you and closes in. The sweep or a core: it pounces. The scanner's
         // hum: it freezes to listen for a moment, and if the beam finds it in that moment it bolts.
@@ -280,9 +576,9 @@ export class Stalker {
         this.fix(n.x, n.z, T);
         this.followD = Math.max(STALKER.followNear, this.followD - this.diff.stalkClose);
         this.echoT = 0.11;
-      } else if (this.state === 'hunt' || this.state === 'alert') {
+      } else if (this.state === 'hunt' || this.state === 'alert' || this.state === 'flank') {
         if (n.exact || d < loud * 0.6) this.fix(n.x, n.z, T);
-      } else if (n.exact || d < loud * 0.35 || this.state === 'linger' || this.state === 'search') {
+      } else if (n.exact || d < loud * 0.35 || this.state === 'linger' || this.state === 'search' || this.state === 'feint') {
         this.notice(n.x, n.z, T);
       } else if (n.kind === 'tracker' && this.calm) {
         this.hearPing(n, d, T);
@@ -291,8 +587,8 @@ export class Stalker {
         this.fix(n.x, n.z, T);
         this.enter('stalk', T);
       } else {
-        const j = d * 0.12;
-        this.target = {x: n.x + (this.rand() * 2 - 1) * j, z: n.z + (this.rand() * 2 - 1) * j};
+        // the likeliest spot around that sound: rough the first time, sharper with every sound after it
+        this.target = this.belief.peakNear(n.x, n.z, Math.max(2, d * 0.2));
         this.enter('investigate', T);
       }
     }
@@ -307,11 +603,14 @@ export class Stalker {
     if (T - this.pingAt > TRACKER.pingWindow) this.pings = 0;
     this.pings++; this.pingAt = T; this.pingX = n.x; this.pingZ = n.z;
     if (!this.heardPing) { this.heardPing = true; this.events.push('ping'); }
-    if (this.diff.trkNotice && this.pings >= this.diff.trkNotice) { this.notice(n.x, n.z, T); return; }
+    if (this.memory.note('tracker', 0.4)) this.learned('tracker');
+    if (this.diff.trkNotice && this.pings >= this.diff.trkNotice) { this.notice(n.x, n.z, T, 'tracker'); return; }
     if (this.pings === 1) {
       const r = this.rand();
-      if (r < this.diff.trkFreeze) { this.enter('wait', T); this.timer = 4 + this.rand() * 3; this.afterPing = true; return; }
-      if (r < this.diff.trkFreeze + this.diff.trkListen) {
+      // the more it knows your tracker, the likelier it is to stand still for it
+      const freeze = this.diff.trkFreeze && this.diff.trkFreeze + 0.25 * this.memory.weight('tracker') * this.diff.adapt;
+      if (r < freeze) { this.enter('wait', T); this.timer = 4 + this.rand() * 3; this.afterPing = true; return; }
+      if (r < freeze + this.diff.trkListen) {
         this.enter('listen', T); this.face = Math.atan2(n.x - this.x, -(n.z - this.z)); this.afterPing = true; return;
       }
     }
@@ -333,7 +632,7 @@ export class Stalker {
   update(dt, T, player) {
     if (!this.active) return false;
     const nav = this.nav, A = this.actor;
-    this.player = player;
+    this.player = player; this.now = T;
 
     this.repathed = (this.repathT -= dt) <= 0;
     if (this.repathed) {
@@ -342,6 +641,18 @@ export class Stalker {
     }
     this.playerDist = nav.distAt(this.field, player.x, player.z, 2.5);
     this.euclid = Math.hypot(player.x - this.x, player.z - this.z);
+
+    // its reasoning: the map spreads with time, and wherever it stands you evidently are not
+    this.arousal = Math.max(0, this.arousal - dt / STALKER.arousalFade);
+    if (this.state !== 'finale') {
+      this.belief.step(dt);
+      if (this.repathed) { this.belief.touch(this.x, this.z); this.planner.markSeen(T); }
+      this.director.update(dt, this, player);
+      this.noteHiding(player);
+    }
+    if ((this.hunting || this.state === 'alert' || this.state === 'linger') && this.euclid < 2.6 && T - this.closeAt > 12) {
+      this.closeAt = T; this.events.push('closecall');
+    }
 
     // the scanner's light on its skin: hold the beam on it and it knows where the beam comes from
     const fresh = A.hits - this.prevHits;
@@ -358,10 +669,12 @@ export class Stalker {
       this.pinScream = T;
       this.sounds.shriek(this.x, this.z, this.muffle(), 0.07);
       this.events.push('pinned');
+      this.pinnedAt = T;
+      if (this.memory.note('beam')) this.learned('beam');
     }
     if (wasPinned && !this.pinned && heldFor > STALKER.surgeAfter) {
       // let go, it comes at once: hunting, a fresh dash straight at you; otherwise a burst of speed
-      if (this.state === 'hunt') { this.fix(player.x, player.z, T); this.burst = 'dash'; this.burstT = this.diff.dashTime; this.pulseIn = -1; }
+      if (this.state === 'hunt') { this.fix(player.x, player.z, T); this.burst = 'dash'; this.burstT = this.dashLen; this.pulseIn = -1; this.cutoff = null; }
       else if (this.hunting || this.state === 'search' || this.state === 'alert') this.surgeT = STALKER.surge;
     }
     // once it knows you are there, hold it in the light long enough and it breaks and runs; each time it
@@ -373,7 +686,7 @@ export class Stalker {
     }
     // following you, it wants not to be seen: the first touch of the beam and it is gone
     else if (this.state === 'stalk' && fresh > 0) this.enter('flee', T);
-    else if (this.exposure > this.diff.lightHold && this.playerDist < 16 && this.state !== 'finale' && this.state !== 'flee') this.notice(player.x, player.z, T);
+    else if (this.exposure > this.diff.lightHold && this.playerDist < 16 && this.state !== 'finale' && this.state !== 'flee') this.notice(player.x, player.z, T, 'light');
     if (this.graceFor > 0) this.graceFor -= dt;
 
     // sonar: a click burst now and then while it walks or listens; the echo follows a moment later
@@ -384,26 +697,39 @@ export class Stalker {
       this.paintEcho(T, n);
     }
     if (this.sonarOn && this.pulseIn < 0 && (this.sonarT -= dt) <= 0) {
-      this.sonarT = this.span(this.state === 'patrol' || this.state === 'investigate' ? STALKER.sonarWalking : STALKER.sonarEvery);
+      // worked up, it clicks more often; off the boil, less
+      this.sonarT = this.span(this.state === 'patrol' || this.state === 'investigate' ? STALKER.sonarWalking : STALKER.sonarEvery)
+        * (1 - 0.35 * this.arousal) * (this.director.relaxing ? 1.4 : 1);
       this.click(T);
     }
 
-    // coming up on someone hidden or keeping still: it stops right there and listens. While it is
-    // searching for you, only a hiding spot does that; out in the open it may walk right into you.
-    if ((player.hidden || (player.quiet && this.calm)) && (this.calm || this.state === 'search') && T > this.lingerAfter
+    // coming up on someone hidden or keeping still: it stops right there, and listens, and leans in. On Hard,
+    // while it is searching for you, only a hiding spot does that; out in the open it walks right into you.
+    if ((player.hidden || (player.quiet && this.unaware)) && (this.unaware || this.state === 'search') && T > this.lingerAfter
         && this.playerDist < STALKER.lingerDist && this.euclid < STALKER.lingerDist) {
       this.lingerAfter = T + 15;
       this.lingerHid = player.hidden;
+      // a hiding place it remembers you using: it stays longer, and your breathing can give you away
+      let known = false;
+      if (player.hidden) this.hides.forEach((h, i) => { if (Math.hypot(player.x - h.x, player.z - h.z) < h.r && this.memory.hideCount(i) >= this.diff.hideMemory) known = true; });
+      // or out in the open, it has stood right here before, not long ago, and something has brought it back.
+      // (A hiding spot muffles your breathing, until it has learned that spot.)
+      if (!player.hidden && this.suspects(player, T)) known = true;
       this.enter('linger', T);
+      this.lingerKnown = known;
+      if (known) { this.timer = Math.min(this.timer * 1.5, this.holdable); this.events.push('knownhide'); }
     }
 
     const reach = A.crawl > 0.5 ? STALKER.catchCrawl : STALKER.catchDist;
     if (this.recoilT > 0) this.recoilT -= dt;
-    else if (this.euclid < reach && this.state !== 'flee' && (!player.hidden || this.state === 'finale')) {
+    else if (this.euclid < reach && this.state !== 'flee' && (!player.hidden || this.state === 'finale' || this.exposed)) {
       // on Easy, blundering into it before it knows you are there gives you one chance to run
-      if (!(this.diff.bumpGrace && this.calm && T > this.graceAfter)) return true;
+      if (!(this.diff.bumpGrace && this.calm && T > this.graceAfter)) {
+        if (this.calm) this.clue = 'bump';
+        return true;
+      }
       this.graceAfter = T + 20; this.recoilT = this.diff.alertTime + 0.3;
-      this.notice(player.x, player.z, T);
+      this.notice(player.x, player.z, T, 'bump');
     }
 
     let speed = 0, listening = false, breath = 1;
@@ -414,9 +740,24 @@ export class Stalker {
     switch (this.state) {
       case 'patrol': {
         if (!this.target) this.target = this.nextPatrol(this.unnoticedNear());
-        if (!this.target) { this.enter('listen', T); break; } // every way on passes you: it stays and listens
-        speed = STALKER.patrol;
-        if (this.arrived()) { this.target = null; this.enter(this.rand() < STALKER.waitChance ? 'wait' : 'listen', T); }
+        if (!this.target) { // every way on passes you. It waits; but it will not wait for ever
+          if (++this.blocked >= 2 && this.diff.suspect && T > this.lingerAfter) {
+            this.blocked = 0; this.lingerAfter = T + 15;
+            this.enter('linger', T);
+            this.lingerHid = player.hidden; this.lingerKnown = !player.hidden; this.timer = Math.min(this.timer + 4, this.holdable);
+            if (this.lingerKnown) this.events.push('knownhide');
+          } else this.enter('listen', T);
+          break;
+        }
+        this.blocked = 0;
+        speed = STALKER.patrol * (1 + 0.5 * this.arousal);
+        if (this.arrived()) {
+          this.target = null;
+          if (this.goal === 'choke' && !this.director.relaxing && this.brainRand() < this.diff.waylay) {
+            // a good place to wait: silent, still, invisible to your tracker, ears wide open
+            this.enter('wait', T); this.timer = this.span(STALKER.waylayTime) * this.temper.patient; this.waylaying = true;
+          } else this.enter(this.rand() < STALKER.waitChance ? 'wait' : 'listen', T);
+        }
         break;
       }
       case 'listen': {
@@ -431,7 +772,7 @@ export class Stalker {
         break;
       }
       case 'investigate': {
-        speed = STALKER.investigate;
+        speed = STALKER.investigate * (1 + 0.25 * this.arousal);
         if (this.arrived()) { this.target = null; this.enter('listen', T); this.timer += 2; }
         break;
       }
@@ -439,17 +780,25 @@ export class Stalker {
         listening = true; breath = 0;
         const want = Math.atan2(this.lastKnown.x - this.x, -(this.lastKnown.z - this.z));
         this.face += clamp(angleDiff(this.face, want), -4 * dt, 4 * dt);
-        if ((this.timer -= dt) <= 0) this.enter('hunt', T);
+        if ((this.timer -= dt) <= 0) this.enter(this.wantsFlank(T) ? 'flank' : 'hunt', T);
+        break;
+      }
+      case 'flank': { // the long way round, to the door you are not watching, quietly
+        this.sinceFix += dt;
+        speed = STALKER.hunt; breath = 0.3;
+        if (this.arrived() || (this.timer -= dt) <= 0) this.enter('hunt', T);
         break;
       }
       case 'hunt': {
         this.sinceFix += dt;
         if (this.burst === 'dash') {
           // with no fresh sound it heads a little way along where it reckons you were going, and pulls up
-          // just short of there to listen rather than charging blindly through
-          this.target = this.sinceFix > 0.5 ? this.guess(1) : this.lastKnown;
+          // just short of there to listen rather than charging blindly through. If it saw which door you
+          // were running for and can get there first, it runs for the door instead.
+          const cut = this.cutoff && this.sinceFix < 3 ? this.cutoff : null;
+          this.target = cut || (this.sinceFix > 0.5 ? this.guess(1) : this.lastKnown);
           speed = STALKER.dash;
-          const short = this.sinceFix > 0.5 && Math.hypot(this.target.x - this.x, this.target.z - this.z) < 1.3;
+          const short = !cut && this.sinceFix > 0.5 && Math.hypot(this.target.x - this.x, this.target.z - this.z) < 1.3;
           if ((this.burstT -= dt) <= 0 || short || (this.arrived() && this.sinceFix > 0.3)) {
             // stop dead, ear open, and click: the echo comes a moment later
             this.burst = 'click'; this.target = null; this.fixAtClick = this.fixT;
@@ -462,12 +811,22 @@ export class Stalker {
           const want = Math.atan2(this.lastKnown.x - this.x, -(this.lastKnown.z - this.z));
           this.face += clamp(angleDiff(this.face, want), -4 * dt, 4 * dt);
           if (this.pulseIn < 0) {
+            // an empty click, and it knows the trick: a second, right behind it, for anyone who starts moving again
+            const empty = !(this.fixT > this.fixAtClick);
+            if (empty && !this.doubled && this.brainRand() < this.diff.doubleClick * (0.6 + 0.8 * this.memory.weight('freeze') * this.diff.adapt)) {
+              this.doubled = true;
+              this.pulseIn = this.diff.huntWarn * 0.85; this.actor.flare = 1;
+              this.sounds.clicks(this.x, this.z, this.muffle(), 'short');
+              if (this.euclid < this.diff.sonar + 4) this.events.push('windup');
+              break;
+            }
+            this.doubled = false;
             // nothing moved in the echo and nothing heard since the click: an empty one. Empty right where
             // it last placed you, you are not there: it searches the area (a few in a row, anywhere, too)
             this.emptyClicks = this.fixT > this.fixAtClick ? 0 : this.emptyClicks + 1;
             const there = Math.hypot(this.lastKnown.x - this.x, this.lastKnown.z - this.z) < 2.5;
             if (this.emptyClicks >= this.diff.huntCycles || (this.emptyClicks > 0 && there)) { this.enter('search', T); break; }
-            this.burst = 'dash'; this.burstT = this.diff.dashTime;
+            this.burst = 'dash'; this.burstT = this.dashLen; this.cutoff = this.cutoffSpot();
           }
         }
         break;
@@ -478,8 +837,10 @@ export class Stalker {
           if ((this.timer -= dt) <= 0 && this.pulseIn < 0) {
             if (--this.searchLeft <= 0) {
               this.target = null;
-              // nothing: it goes quiet, or it waits for your footsteps and follows them
-              if (this.wantsStalk(T)) this.enter('stalk', T); else this.enter('listen', T);
+              // nothing: it goes quiet, or it waits for your footsteps and follows them, or it pretends to leave
+              if (this.wantsStalk(T)) this.enter('stalk', T);
+              else if (this.wantsFeint(T)) this.enter('feint', T);
+              else this.enter('listen', T);
             } else { this.target = this.searchSpot(); this.ambushing = false; }
           }
         } else {
@@ -507,7 +868,24 @@ export class Stalker {
         // close enough: it pounces
         if (moving && this.followD <= STALKER.followNear && this.playerDist < STALKER.followNear + 0.8) {
           this.fix(player.x, player.z, T);
+          this.clue = 'stalk';
           this.enter('hunt', T);
+        }
+        break;
+      }
+      case 'feint': { // off with a heavy tread, making sure you hear it; then back, without a sound
+        if (this.feintPhase === 'away') {
+          speed = STALKER.investigate * 0.8;
+          if ((this.timer -= dt) <= 0 || this.arrived()) {
+            this.feintPhase = 'back';
+            this.target = this.belief.peakNear(this.feintBack.x, this.feintBack.z, 8);
+          }
+        } else {
+          speed = STALKER.investigate; breath = 0;
+          if (this.arrived() || (player.quiet && this.euclid < 2)) {
+            this.target = null;
+            this.enter('wait', T); this.timer = this.span(STALKER.feintWait) * this.temper.patient; this.waylaying = true;
+          }
         }
         break;
       }
@@ -519,9 +897,29 @@ export class Stalker {
       case 'linger': { // right beside you, listening hard
         listening = true; breath = 1.4;
         facePlayer();
+        // it leans closer, drawing the air in
+        this.lingerFor += dt;
+        if (this.lingerFor > STALKER.leanAfter) {
+          if (!this.sniffed) { this.sniffed = true; this.sounds.sniff(this.x, this.z, this.muffle()); }
+          const d = this.euclid;
+          if (d > STALKER.leanStop && !this.pinned && nav.lineClear(this.x, this.z, player.x, player.z)) {
+            const step = Math.min(d - STALKER.leanStop, STALKER.leanSpeed * dt);
+            const nx = this.x + (player.x - this.x) / d * step, nz = this.z + (player.z - this.z) / d * step;
+            if (nav.walkableAt(nx, nz)) { this.x = nx; this.z = nz; }
+          }
+        }
         // standing up out of a hiding spot, or lighting the scanner in it, right beside it
-        if (this.lingerHid && !player.hidden) this.notice(player.x, player.z, T);
-        else if ((this.timer -= dt) <= 0) { this.target = null; this.enter('patrol', T); }
+        if (this.lingerHid && !player.hidden) { this.notice(player.x, player.z, T, 'stood'); break; }
+        // at a hiding place it knows, it can hear you breathing, unless you hold your breath
+        if (this.lingerKnown && !player.holdingBreath && this.euclid < 2.4 && (this.breathT += dt) > STALKER.knownBreath) {
+          this.exposed = true;
+          this.notice(player.x, player.z, T, 'breath');
+          break;
+        }
+        if ((this.timer -= dt * (player.holdingBreath ? STALKER.holdRate : 1)) <= 0) {
+          this.stoodAt = {x: player.x, z: player.z, T}; // nothing, this time
+          this.target = null; this.enter('patrol', T);
+        }
         break;
       }
       case 'finale': {
@@ -531,7 +929,9 @@ export class Stalker {
         if ((this.timer -= dt) <= 0 || (near && this.repathed)) {
           this.timer = this.diff.finaleGuess;
           const j = near ? 0 : Math.min(4, this.playerDist * this.diff.finaleJitter);
-          this.target = {x: player.x + (this.rand() * 2 - 1) * j, z: player.z + (this.rand() * 2 - 1) * j};
+          // it knows you want the door. Now and then it stops following and goes to meet you on the way
+          const cut = !near && this.brainRand() < this.diff.finaleCut ? this.headOff(player) : null;
+          this.target = cut || {x: player.x + (this.rand() * 2 - 1) * j, z: player.z + (this.rand() * 2 - 1) * j};
         }
         speed = STALKER.finale;
         break;
@@ -545,6 +945,11 @@ export class Stalker {
         // once it has heard your tracker it can copy that too, if it is clever enough (Normal and Hard)
         const pool = this.heardPing && this.diff.trkFreeze > 0 ? MIMICS_TRACKER : MIMICS;
         this.sounds.mimic(pool[Math.floor(this.rand() * pool.length)], this.x, this.z, this.muffle());
+        // sometimes it is bait: it goes silent, to hear whether you come to look
+        if (this.state === 'patrol' && !this.director.relaxing && this.brainRand() < this.diff.waylay) {
+          this.target = null;
+          this.enter('wait', T); this.timer = this.span(STALKER.lureWait); this.waylaying = true;
+        }
       }
     }
     if ((this.state === 'patrol' || this.state === 'investigate') && (this.groanT -= dt) <= 0) {
@@ -563,6 +968,7 @@ export class Stalker {
       speed *= STALKER.lunge;
       if ((this.lungeT += dt) > this.diff.lungeMax) { this.lungeT = 0; this.stumbleT = STALKER.stumble; }
     } else this.lungeT = Math.max(0, this.lungeT - dt);
+    speed = Math.min(speed, STALKER.maxSpeed);
     this.speed = speed;
     if (speed > 0 && this.target) {
       const x0 = this.x, z0 = this.z;
@@ -585,12 +991,15 @@ export class Stalker {
       this.sounds.creatureStep(this.x, this.z, Math.max(0.45, muffle), 0.7, false);
       if (++this.echoes === 4) this.events.push('echo');
     }
-    if (speed > 0 && this.state !== 'stalk') {
+    const silent = this.state === 'stalk' || (this.state === 'feint' && this.feintPhase === 'back');
+    if (speed > 0 && !silent) {
       const crawling = A.crawl > 0.5;
       this.stepAcc += dt * speed;
       if (this.stepAcc > (crawling ? 1.25 : 0.78)) {
         this.stepAcc = 0; this.stepN++;
-        if (crawling) this.sounds.gallop(this.x, this.z, muffle);
+        if (this.state === 'feint') this.sounds.stomp(this.x, this.z, muffle);
+        else if (this.state === 'flank') this.sounds.creatureStep(this.x, this.z, Math.max(0.6, muffle), 0.7, false);
+        else if (crawling) this.sounds.gallop(this.x, this.z, muffle);
         else this.sounds.creatureStep(this.x, this.z, muffle, speed > 2 ? 1.2 : 1, this.stepN % 2 === 0);
         if (this.euclid < 8) buzz(Math.round(8 + (8 - this.euclid) * 5), 110);
       }
@@ -615,9 +1024,17 @@ export class Stalker {
     return !this.target || this.stuck > STALKER.stuckAfter || Math.hypot(this.target.x - this.x, this.target.z - this.z) < 0.7;
   }
 
-  /** A spot to search near where it lost you, more often ahead of the way you were heading. */
+  /**
+   * A spot to search near where it lost you: wherever its map says you are likeliest, within reach, so it
+   * never checks the same corner twice while somewhere better is left. Now and then it goes by instinct:
+   * near where it lost you, more often ahead of the way you were heading.
+   */
   searchSpot() {
     const c = this.searchC, R = this.diff.searchRadius, v = this.fixVel, heading = Math.hypot(v.x, v.z) > 0.5;
+    if (this.brainRand() < 0.8) {
+      const b = this.belief.best(this.field, {min: 1.5, max: R * 1.8, D: R * 1.6});
+      if (b) return {x: b.x, z: b.z};
+    }
     for (let k = 0; k < 16; k++) {
       let a = this.rand() * Math.PI * 2;
       if (heading && this.rand() < this.diff.predict) a = Math.atan2(v.z, v.x) + (this.rand() - 0.5) * 2;
@@ -635,7 +1052,8 @@ export class Stalker {
    */
   ambushSpot() {
     const P = this.pnav, L = this.lastKnown, w = this.world, minH = this.nav.minH;
-    if (!this.diff.ambush || !P || P.n !== this.nav.n) return null;
+    // (a creature that has not thought of it on its own can still learn it, if you always use the crawls)
+    if ((!this.diff.ambush && this.memory.weight('crawl') * this.diff.adapt < 0.5) || !P || P.n !== this.nav.n) return null;
     const low = i => P.walk[i] && w.heightAt(P.cx(i), P.cz(i)) < minH;
     const s = P.nearest(L.x, L.z, 1);
     if (s < 0 || !low(s)) return null;
@@ -657,7 +1075,9 @@ export class Stalker {
         if (isFinite(d) && d > bd) { bd = d; best = {x: P.cx(j), z: P.cz(j)}; }
       }
     }
-    return best && bd < 50 ? best : null;
+    if (!(best && bd < 50)) return null;
+    if (this.memory.note('crawl')) this.learned('crawl');
+    return best;
   }
 
   /** The player, when they are close, out in the open and keeping still and quiet; otherwise null. */
@@ -671,25 +1091,23 @@ export class Stalker {
    * past it. Just after a respawn it keeps clear of where you came back, if it can.
    */
   nextPatrol(avoid = null) {
-    const pts = this.cfg.patrol, n = pts.length, i0 = Math.floor(this.rand() * n), g = this.graceFor > 0 && this.avoid;
-    for (const grace of g ? [true, false] : [false]) {
-      for (let k = 0; k < n; k++) {
-        const i = (i0 + k) % n;
-        if (i === this.patrolAt && n > 1) continue;
-        if (grace && Math.hypot(pts[i][0] - this.avoid.x, pts[i][1] - this.avoid.z) < STALKER.respawnClear) continue;
-        if (avoid && !this.routeClear(pts[i], avoid)) continue;
-        this.patrolAt = i;
-        return {x: pts[i][0], z: pts[i][1]};
-      }
+    const s = this.planner.next(this.now, avoid);
+    if (s) {
+      this.goal = s.kind;
+      if (s.kind === 'patrol') this.patrolAt = s.i;
+      return {x: s.x, z: s.z};
     }
-    return avoid ? null : {x: pts[i0][0], z: pts[i0][1]};
+    if (avoid) return null;
+    const p = this.cfg.patrol[Math.floor(this.rand() * this.cfg.patrol.length)];
+    this.goal = 'patrol';
+    return {x: p[0], z: p[1]};
   }
 
-  /** True when the walk to `pt` never comes closer to `a` than the clearance (or than it already is). */
-  routeClear(pt, a) {
+  /** True when the walk to `pt` never comes closer to `a` than `keep` (or than it already is). */
+  routeClear(pt, a, keep = STALKER.clearance + 0.3) {
     const nav = this.nav, path = nav.path(this.field, pt[0], pt[1], 4);
     if (!path) return false;
-    const lim = Math.min(STALKER.clearance + 0.3, Math.hypot(a.x - this.x, a.z - this.z) - 0.4);
+    const lim = Math.min(keep, Math.hypot(a.x - this.x, a.z - this.z) - 0.4);
     for (const c of path) if (Math.hypot(nav.cx(c) - a.x, nav.cz(c) - a.z) < lim) return false;
     return true;
   }
@@ -715,7 +1133,7 @@ export class Stalker {
       if (path.length <= 2 && nav.lineClear(this.x, this.z, tx, tz)) { gx = tx; gz = tz; }
     } else if (!path) {
       // target unreachable (crawlspace, behind a door): stop and listen
-      if (this.state !== 'finale') { this.target = null; this.enter('listen', 0); }
+      if (this.state !== 'finale') { this.target = null; this.enter('listen', this.now); }
       return;
     }
     const dx = gx - this.x, dz = gz - this.z, d = Math.hypot(dx, dz);
@@ -723,8 +1141,8 @@ export class Stalker {
     const step = Math.min(d, speed * dt), nx = this.x + dx / d * step, nz = this.z + dz / d * step;
     // it does not know you are there, so it must not blunder into you: it stops short and listens
     const p = this.unnoticedNear();
-    if (p && this.calm && Math.hypot(p.x - nx, p.z - nz) < Math.min(STALKER.clearance, this.euclid)) {
-      this.target = null; this.enter('listen', 0);
+    if (p && this.unaware && Math.hypot(p.x - nx, p.z - nz) < Math.min(STALKER.clearance, this.euclid)) {
+      this.target = null; this.enter('listen', this.now);
       return;
     }
     // (if it is standing somewhere it should not be, say a door shut on it, any step out is fine)
@@ -741,5 +1159,15 @@ export class Stalker {
     if (this.state === 'linger') return 1;
     const base = clamp(1 - this.playerDist / 16, 0, 1);
     return clamp(base * (this.hunting || this.state === 'alert' || this.state === 'search' ? 1.25 : 0.8), 0, 1);
+  }
+
+  /** A compact account of what it is thinking, for the debug overlay. */
+  thinking() {
+    const b = this.belief;
+    return {state: this.state + (this.state === 'feint' ? ':' + this.feintPhase : this.waylaying ? ':waylay' : this.state === 'hunt' ? ':' + this.burst : ''),
+      goal: this.goal, phase: this.director.phase, menace: +this.director.menace.toFixed(2), arousal: +this.arousal.toFixed(2),
+      unsure: +b.spread().toFixed(1), quiet: Math.round(this.director.quiet), cutoff: !!this.cutoff, decoys: this.decoys,
+      dist: +this.playerDist.toFixed(1), temper: this.temper,
+      knows: Object.fromEntries(['hide', 'beam', 'run', 'crawl', 'tracker', 'stone', 'freeze'].map(k => [k, +this.memory.weight(k).toFixed(2)]))};
   }
 }

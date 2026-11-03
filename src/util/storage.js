@@ -16,3 +16,15 @@ export function save(key, value) {
   memory.set(key, value);
   try { localStorage.setItem(PREFIX + key, JSON.stringify(value)); } catch (e) { /* memory only */ }
 }
+
+/** Whether anything is stored under `key`, in storage or in the in-memory fallback. */
+export function has(key) {
+  if (memory.has(key)) return true;
+  try { return localStorage.getItem(PREFIX + key) != null; } catch (e) { return false; }
+}
+
+/** Remove `key` for good. */
+export function forget(key) {
+  memory.delete(key);
+  try { localStorage.removeItem(PREFIX + key); } catch (e) { /* nothing stored, then */ }
+}

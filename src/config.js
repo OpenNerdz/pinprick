@@ -23,11 +23,14 @@ export const NOISE = {
   step: 7, sprintStep: 15, crouchStep: 2.2,
   scanMin: 4, scanMax: 12,       // the scanner hum, scaled by charge
   sweep: 32, core: 18, overheat: 10, slam: 22,
+  stone: 17,                     // a stone landing; later bounces carry less
+  throw: 3.5,                    // your arm and sleeve as you throw: throw from close by and it hears who threw it
+  pant: 3.4, gasp: 8,            // winded breathing (scaled by how winded), and running out of held breath
 };
 
 export const SCANNER = {
   chargeTime: 2.4,               // seconds to spin up to full density
-  heatRate: 0.08, heatRateCharge: 0.1, // heat per second while scanning: ~9 s at full charge
+  heatRate: 0.08, heatRateCharge: 0.1, // heat per second while scanning: about 6 s at full charge
   coolRate: 0.24, coolDelay: 0.4,
   ventBelow: 0.35,               // overheated scanner restarts below this heat
   sweepTime: 2.6, sweepCooldown: 30,
@@ -49,6 +52,23 @@ export const TRACKER = {
   pingWindow: 8,                 // pings it hears within this many seconds add up
 };
 
+// Stones you can throw to draw it away. It falls for this only a few times (stoneTrust, by difficulty).
+export const STONES = {
+  speed: 14, lift: 0.14, gravity: 9.8,  // m/s out of your hand, slightly above where you are aiming
+  bounce: 0.38, bounces: 3, falloff: 0.55, // speed kept per bounce, how many, how much quieter each is
+  ripple: 46, rippleR: 1.5,             // dots thrown up around the landing, and how far they reach
+};
+
+// Your breath. Sprinting winds you, and it can hear you panting up close. Hold your breath to stop that,
+// and it decides sooner that it heard nothing; run out and you gasp, which it certainly hears.
+export const LUNGS = {
+  refill: 1 / 6,                  // a full breath back in this many seconds
+  lockout: 2.5,                   // seconds after a gasp before you can hold your breath again
+  shaky: 0.3,                     // letting go with less than this left is a small gasp of its own
+  windRise: 0.22, windFade: 0.085, // how fast sprinting winds you, and how fast it passes
+  panting: 0.15, every: 1.35,     // winded past this you pant, one audible breath every so often
+};
+
 export const DOTS = {capacity: 100000, life: 20};
 
 export const STALKER = {
@@ -63,7 +83,6 @@ export const STALKER = {
   waitChance: 0.3, waitTime: [8, 14],      // sometimes stands silent and still instead of listening
   mimicEvery: [30, 60], groanEvery: [18, 38], // rare enough that each one lands
   crawlBelow: 2.6,               // ceilings lower than this put it on all fours
-  loseAfter: 4.5,                // seconds without a fix before a hunt turns into a search
   listenTime: [2.5, 5],
   stuckAfter: 1.2,               // seconds without progress (a crawl mouth, a shut door) before it gives up on a spot
   searchListen: 1.4,             // it stops this long at each spot it searches
@@ -81,6 +100,23 @@ export const STALKER = {
   stalkPatience: 8,              // seconds without hearing you before it gives up the trail
   stalkCooldown: 45,             // after your beam touches it while it stalks, it leaves you alone this long
   respawnGrace: 25, respawnClear: 16, // after a respawn it keeps this far from where you came back
+  // its reasoning
+  arousalFade: 45,               // seconds for it to calm down after a chase
+  dashDeaf: 0.7,                 // flat out, its own feet drown out some of what it would hear
+  maskDrop: 0.75,                // the most a machine running nearby can take off how far sounds carry to it
+  // tricks
+  feintAway: [7, 11], feintWait: [8, 14], // the noisy walk away, then waiting where it came back to
+  feintEvery: 60,                // at least this long between feints
+  waylayTime: [10, 18], waylayPounce: 4.5, // standing silent in a chokepoint; how near your steps must come
+  lureWait: [5, 8],              // silent after copying a sound, to hear whether you come to it
+  flankMemory: 90, flankTimeout: 18, // how long it remembers being pinned, and gives the long way round
+  leanAfter: 1.2, leanSpeed: 0.45, leanStop: 1.6, // beside you it leans closer, down to this far away
+  knownBreath: 3,                // at a hiding place it remembers, it hears your breathing after this long
+  movedAway: 2.5,                // this far from where it last placed you, you have got away from that fix
+  maxSpeed: 7,                   // nothing it does takes it faster than this
+  suspectR: 7, suspectFor: 100,  // back within this far of where it last stood over you, within this long: it suspects
+  fleeRest: 10,                  // driven off by your light, it leaves you be for at least this long
+  holdRate: 1.6,                 // with your breath held, it decides this much sooner that it heard nothing
   repathEvery: 0.25,
 };
 
@@ -105,6 +141,22 @@ export const STALKER = {
  *   hints         short on-screen hints the first time each of its tricks shows up
  *   finaleGuess   seconds between its guesses at where you are after the last core; finaleJitter, how
  *                 rough each guess is (fraction of the distance); finaleNear, the range where it is exact
+ * What it works out, and how it paces itself (see belief.js, memory.js, planner.js, director.js):
+ *   adapt         0..1, how much what it has learned about you counts
+ *   intercept     chance that, seeing which way you are running, it goes for the door ahead of you
+ *   flank         chance that, having been pinned in your light lately, it comes in by another way
+ *   feint         chance that, giving up a search, it walks off loudly and comes back in silence
+ *   waylay        chance that, reaching a chokepoint, it stands silent and waits there
+ *   doubleClick   chance of a second click right after an empty one, for those who move again too soon
+ *   searchBump    searching, it walks right into a motionless player even if they moved after it last placed
+ *                 them; otherwise, in that case, it stops beside them and leans in, as on patrol
+ *   suspect       coming back to where it already stood over you, it can hear your breathing unless you hold it
+ *   finaleCut     chance, at each guess in the last chase, that it heads you off on your way to the door
+ *   hideMemory    times you must use a hiding place before it remembers that place
+ *   stoneTrust    thrown stones it falls for before it works them out; stones, how many you carry
+ *   lungs         seconds you can hold your breath
+ *   peakSpan      seconds of being hunted it takes to fill the pressure gauge; relax, the breather after
+ *   hunchAfter    seconds with nothing happening before it gets a vague hunch where to wander
  * The motion tracker:
  *   trkRange      metres it sees, in a straight line through rock
  *   trkBattery    seconds a full battery lasts; trkStart, charge at the start of a level; trkRefill, what
@@ -124,6 +176,8 @@ export const DIFFICULTY = {
     lightHold: 1.2, alertTime: 1.15, lungeMax: 1.0, listen: 1, predict: 0, searchPoints: 1, searchRadius: 5, ambush: false, bumpGrace: true,
     sonar: 7, sonarWarn: 1.2, sonarCrouch: true, burn: 1.5, burnLearn: 0, stalk: 0.2, stalkClose: 0.12, hints: true,
     finaleGuess: 2.5, finaleJitter: 0.2, finaleNear: 6,
+    adapt: 0.35, intercept: 0, flank: 0, feint: 0.1, waylay: 0, doubleClick: 0, searchBump: false, suspect: false, finaleCut: 0, hideMemory: 5, stoneTrust: 5, stones: 6, lungs: 11,
+    peakSpan: 18, relax: 45, hunchAfter: 45,
     trkRange: 26, trkBattery: 110, trkStart: 0.8, trkRefill: 0.5, trkCells: 1, trkNoise: 2.5,
     trkFreeze: 0, trkListen: 0.3, trkNotice: 0, trkBehind: true, trkJitter: 0.3, trkFade: 2.4,
   },
@@ -134,6 +188,8 @@ export const DIFFICULTY = {
     lightHold: 0.7, alertTime: 0.85, lungeMax: 1.2, listen: 1.3, predict: 0.6, searchPoints: 3, searchRadius: 7, ambush: true,
     sonar: 10, sonarWarn: 0.9, sonarCrouch: false, burn: 2.5, burnLearn: 1, stalk: 0.45, stalkClose: 0.25, hints: true,
     finaleGuess: 1.5, finaleJitter: 0.12, finaleNear: 8,
+    adapt: 0.7, intercept: 0.5, flank: 0.5, feint: 0.3, waylay: 0.25, doubleClick: 0.2, searchBump: false, suspect: true, finaleCut: 0.35, hideMemory: 3, stoneTrust: 2, stones: 4, lungs: 9,
+    peakSpan: 28, relax: 26, hunchAfter: 22,
     trkRange: 20, trkBattery: 72, trkStart: 0.5, trkRefill: 0.4, trkCells: 0.75, trkNoise: 3.5,
     trkFreeze: 0.3, trkListen: 0.3, trkNotice: 4, trkBehind: true, trkJitter: 0.6, trkFade: 2.0,
   },
@@ -144,6 +200,8 @@ export const DIFFICULTY = {
     lightHold: 0.45, alertTime: 0.6, lungeMax: 1.5, listen: 1.6, predict: 1, searchPoints: 5, searchRadius: 9, ambush: true,
     sonar: 13, sonarWarn: 0.65, sonarCrouch: false, burn: 3.5, burnLearn: 1, stalk: 0.7, stalkClose: 0.35, hints: false,
     finaleGuess: 1, finaleJitter: 0.06, finaleNear: 12,
+    adapt: 1, intercept: 0.9, flank: 0.9, feint: 0.5, waylay: 0.45, doubleClick: 0.4, searchBump: true, suspect: true, finaleCut: 0.7, hideMemory: 2, stoneTrust: 1, stones: 3, lungs: 8,
+    peakSpan: 45, relax: 14, hunchAfter: 12,
     trkRange: 16, trkBattery: 56, trkStart: 0.35, trkRefill: 0.35, trkCells: 0.5, trkNoise: 4.5,
     trkFreeze: 0.55, trkListen: 0.25, trkNotice: 3, trkBehind: false, trkJitter: 1.0, trkFade: 1.3,
   },

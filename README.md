@@ -4,8 +4,9 @@ A first-person horror game you only ever see through scanner dots. Hold the trig
 with points of light that fade after a few seconds. Something else is down there. It cannot see, but
 it hears the scanner, your footsteps and the sweep.
 
-Four levels: **Intake** (tutorial, nothing hunting you), **Sublevel** (the original map, the creature
-wakes when you take the first core), **Cistern** and **Lift Shaft**.
+Five levels: **Intake** (tutorial, nothing hunting you), **Sublevel** (the original map, the creature
+wakes when you take the first core), **Cistern**, **Lift Shaft** and **Pump Hall**, whose great pump
+drowns out your footsteps while it runs.
 
 The creature is built for listening. It has no eyes, just a long smooth skull with four flaps folded
 back along it, which fan open round its mouth like a dish when it listens or clicks. Its neck is too
@@ -38,9 +39,41 @@ Difficulty changes its wits as well as its ears: how fast it reacts, how long it
 and how much warning its clicks give, how many empty clicks it takes to give up, how far its sonar reaches and how
 long the clicks warn you, how long the light takes to break it, how often and how fast it stalks, whether it
 reads which way you ran, how long it searches, and whether it goes round to wait at the far end of a
-crawl. After you are caught it keeps away from where you come back for a while. `node
-tools/balance.mjs` plays scripted players against it on every level and difficulty and prints how often
-each gets caught.
+crawl. After you are caught it comes back somewhere new, a long way from you and from the cores you
+still need, and keeps away from you for a while. `node tools/balance.mjs` plays scripted players against
+it on every level and difficulty and prints how often each gets caught; `node tools/playtest.mjs` runs
+whole levels with a cast of player bots who only know what a player could see and hear, and reports
+deaths, hunts, pacing and anything that looks like a bug in the creature.
+
+**How it thinks.** Its brain is built on the rule that it never reads your position. A test proves it:
+two silent players in different places give it an identical picture of the world.
+- **It keeps a map of where you might be.** A grid of odds, fed only by what it hears and by the places
+  it has searched and found empty. The odds spread out over time, along paths you could really walk.
+- **It decides where to go next.** It weighs every room, chokepoint and hiding place by how long since it
+  checked there, how likely you are to be there, what it remembers and how far the walk is. Each creature
+  has its own temperament too: how bold, patient and curious.
+- **A director paces it,** without telling it where you are. Tension builds, and then it wanders off
+  for a while. After a long quiet it gets a vague feeling about part of the level, never narrower than a
+  room or two.
+- **It learns your habits, across runs.** Hide too often, run too much, lean on the beam or the tracker or
+  your stones, and it adapts. The Caught screen tells you what gave you away, the end of a level tells you
+  what it learned, and **Make it forget** in the settings wipes it.
+- **It has tricks,** more of them the higher the difficulty. It cuts you off at the door, flanks you after
+  your beam has pinned it, stomps away loudly and comes back without a sound, waits silently at a
+  chokepoint, clicks twice in case you moved after the first, leans in and sniffs when it stops beside
+  you, remembers your hiding places, and heads you off on the last run to the exit.
+
+**Two ways to fool it.**
+- **Stones** (G, right bumper, or THROW on touch). Throw one and it goes to the sound. You only have a few, and it
+  learns: once it has been fooled too often it stops falling for it, and comes looking for whoever threw it.
+- **Hold your breath** (hold B, left bumper, or BREATH on touch). Beside you, it listens for your breathing, more so
+  at a hiding place it knows or a spot it has already stood over. A full breath outlasts its listening, but let go with
+  almost nothing left and you gasp. Sprinting winds you, and it can hear you panting.
+
+**Gamepads and accessibility.** Standard gamepads work, with rumble where the browser supports it. Settings
+add captions for what you can hear, including which way it comes from, reduced motion and lighter graphics.
+Quit or reload mid-level and **Continue** puts you back at your last core. F3 in `#debug` shows
+the creature's map of odds and what it is thinking.
 
 The scanner in your hand is a real 3D model: every dot leaves its emitter, the coils light as it
 charges, the fins glow as it heats, and the screen on its back shows charge, heat and sweep.
@@ -121,13 +154,19 @@ src/
     raycast.js     DDA grid walk that only tests props in the cells it crosses
     collision.js   player circle vs walls and props (3x3 cells around you)
     nav.js         half-metre walkability grid, Dijkstra fields, paths, line-of-walk
+    topology.js    finds a level's rooms and chokepoints from its shape, for the creature's plans
     level.js       turns a level file into a World plus cores, doors, notes, triggers
   game/            the rules
     session.js     one play of one level: ties everything together, checkpoints, win/death
     player.js      walk, sprint on stamina, crouch, footsteps and their noise
     scanner.js     trigger, heat and overheat, sweep, dot colours; rays leave the gun's emitter
     viewmodel.js   how the gun sits in your hands: sway, lag, recoil, sprint, wall pull-back
-    stalker.js     the creature: hearing by path distance, patrol/investigate/hunt/search/finale
+    stalker.js     the creature's body and senses: hearing by path distance, its states and tricks
+    belief.js      its grid of odds for where you are, fed only by what it senses
+    planner.js     where it goes next when nothing is calling it
+    director.js    pacing: builds tension, lets it drop, vague hunches after a long quiet
+    memory.js      habits it has learned about you, saved between runs
+    stones.js      thrown stones and where they land
     tracker.js     the motion tracker: battery, pulses, what moved, blips; hands.js raises and lowers it
     scares.js      scripted triggers: figure behind you, slams, moving statue, footsteps
     signal.js      the signal bars and ping; static when the creature is near
@@ -139,16 +178,19 @@ src/
     gun.js         its shader: key and rim light, emitter glow, glowing coils, fins and screen
     trackermesh.js, tracker.js   the motion tracker's geometry, and its screen drawn in the shader
     meshkit.js     box / cylinder / extrusion helpers both devices are built from
+    post.js        bloom, grain and fear effects, stepping down by itself on slow GPUs
   audio/           every sound is synthesised; there are no audio files
     dsp.js         sample-level models: filters, ringing modes, grit, friction, a throat
     recipes.js     how each sound is made from them (a boot on concrete, wet clicks, a steel door...)
     bank.js        renders the recipes into buffers at start-up, several variants of each
     engine.js      Web Audio: buses, the cave's reverb, the devices' small speaker, 3D placement
     sounds.js      the vocabulary the game calls: where each sound plays from and how loud
-  ui/              input (touch/mouse/keys -> intent), HUD, settings, haptics
+    worker.js      renders the sound bank off the main thread, so starting up does not stall
+  ui/              input (touch/mouse/keys/gamepad -> intent), HUD, settings, haptics, menus,
+                   captions, the end-of-level debrief, the F3 brain view
   levels/          one file per level + index.js for the order
 test/              node:test suites (no browser needed)
-tools/             build.mjs, smoke.mjs
+tools/             build.mjs, smoke.mjs, balance.mjs, playtest.mjs (player bots, see above), audition*.mjs
 android/           WebView wrapper for the APK
 ```
 

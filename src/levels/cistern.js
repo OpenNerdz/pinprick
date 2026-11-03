@@ -65,6 +65,7 @@ export default {
   decals: [
     {x: 28, y: 3.2, z: 14, face: 's', w: 6, h: 1.4, text: 'COUNT TO TEN\nBEFORE YOU SCAN'},
     {x: 12, y: 1.2, z: 24.8, face: 'e', w: 3.2, h: 0.8, text: 'QUIET IS SAFE'},
+    {x: 18, y: 1.5, z: 36, face: 'w', w: 2.8, h: 0.9, text: 'IT LEFT LOUD\nIT CAME BACK QUIET'},
   ],
   hides: [{x: 14.4, z: 33.2, r: 0.9}, {x: 44.6, z: 33.2, r: 0.9}, {x: 9, z: 8.2, r: 0.9}],
   // west-room crate, east-room switchgear, the fallen grate, south-east corner, pillared hall's far corner
@@ -74,8 +75,11 @@ export default {
     {x: 13, z: 21, r: 2, actions: [['whisper', 34, 26]]},
     {x: 22, z: 6, r: 3, actions: [['steps', 14, 1, 28, 1, 10]]},
     {x: 41, z: 20, r: 1.5, cores: 1, actions: [['silence', 3], ['behind', 2.2]]},
-    {x: 24, z: 34, r: 3, cores: 2, delay: 0.8, actions: [['slam', 'gate'], ['say', 'Behind you, a gate slams shut.', 4000]]},
+    {x: 24, z: 34, r: 3, cores: 2, delay: 0.8, actions: [['slam', 'gate', 'Behind you, a gate slams shut.', 4000]]},
+    // you turn round to look at the gate, and there is a hand on it
+    {x: 24, z: 34, r: 9, cores: 2, shut: 'gate', delay: 1.8, actions: [['handprints', 22.6, 31, 23.6, 31, 's', 2]]},
   ],
+  tune: {hearing: 1.1},
   stalker: {
     spawn: [44, 5], wake: 'start',
     patrol: [[6, 4], [21, 5], [42, 5], [18, 19], [30, 23], [24, 34], [41, 34], [5, 22], [41, 22], [10, 34]],

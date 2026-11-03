@@ -26,6 +26,11 @@ function scenes() {
     ['whisper at 3 m', s => s.whisper(0, -3)], ['door', s => s.doorOpen()], ['core', s => s.core()], ['note', s => s.note()],
     ['battery', s => s.battery()], ['tracker pulse + return', s => { s.trackerPulse(); s.trackerReturn(0.5, 0); }], ['ping', s => s.ping(false, 0.03, 0)],
     ['crackle', s => s.crackle()], ['heart at fear 0.6', s => {}], ['caught', s => s.caught()],
+    // the stealth vocabulary, from here on
+    ['throw', s => s.throwStone()], ['stone at 8 m', s => s.stoneHit(0, -8, 1)], ['stone tick at 8 m', s => s.stoneHit(0, -8, 0.3)],
+    ['hold breath', s => s.holdBreath()], ['release breath', s => s.releaseBreath()], ['gasp', s => s.gasp()],
+    ['chitter at 5 m', s => s.chitter(0, -5, 0)], ['sniff beside you', s => s.sniff(0.8, -0.4, 0)], ['stomp at 5 m', s => s.stomp(0, -5, 0)],
+    ['pant, level 1', s => {}], ['pant, level 0.3', s => {}], ['pump full, 10 m', s => {}], ['pump half, 40 m', s => {}], ['silence after', s => {}],
   ];
   return {
     levels: {
@@ -35,7 +40,20 @@ function scenes() {
         frames(0.2, 3, (s, e, t, dt) => s.updateHum(true, 1, 0.3, 0)), frames(3, 3.1, s => s.updateHum(false, 0, 0, 0)),
         frames(15 * 3, 16 * 3, s => s.setBreath(0.8, 0, -2, 0)), frames(16 * 3, 16 * 3 + 0.1, s => s.setBreath(0, 0, 0)),
         frames(29 * 3, 30 * 3, (s, e, t, dt) => s.heart(dt, 0.6)),
+        frames(40 * 3, 41 * 3, s => s.pant(1)), frames(41 * 3, 42 * 3, s => s.pant(0.3)), frames(42 * 3, 43 * 3, s => s.pant(0)),
+        frames(42 * 3, 43 * 3, s => s.pump(0, -10, 1)), frames(43 * 3, 44 * 3, s => s.pump(0, -40, 0.5)), frames(44 * 3, 45 * 3, s => s.pump(0, -40, 0)),
       ],
+    },
+    pump: {
+      dur: 24, place: 'pumphall',
+      cues: [
+        [0.2, 'stopped: steps and a creature step, in the room', (s, e, at) => { for (let i = 0; i < 5; i++) at(i * 0.5, () => s.step('walk')); at(1, () => s.creatureStep(4, -6, 0)); }],
+        [4, 'it winds up', () => {}],
+        [8, 'full stroke, 12 m off: the same steps and creature step', (s, e, at) => { for (let i = 0; i < 5; i++) at(i * 0.5, () => s.step('walk')); at(1, () => s.creatureStep(4, -6, 0)); }],
+        [18, 'it winds down', () => {}],
+        [22, 'silent again', () => {}],
+      ],
+      every: [frames(4, 24, (s, e, t, dt, st) => { st.l = st.l || 0; st.l += ((t < 18 ? 1 : 0) - st.l) * Math.min(1, dt * (t < 18 ? 1.4 : 0.9)); s.pump(0, -12, st.l); })],
     },
     scanner: {
       dur: 30,
@@ -141,9 +159,11 @@ async function play(name, sceneSrc) {
   window.AudioContext = function () { return ctx; };
   const {AudioEngine, Sounds} = window.Audio2;
   const e = new AudioEngine(), s = new Sounds(e);
-  e.init(); s.start();
+  e.init(); s.start(); s.bank.fillNow(); // offline, no time passes for a background fill
+  if (sc.place) s.setPlace(sc.place);
+  e.applyRoom();
   s.ambience(sc.quiet ? 0 : 0.6, 0.05);
-  const marks = [], st = {};
+  const marks = [], st = {}, errors = [];
   const cueTimes = [];
   const at0 = t0 => (dt, fn) => cueTimes.push([t0 + dt, fn]);
   for (const [t, label, fn] of sc.cues) { cueTimes.push([t, () => fn(s, e, at0(t))]); if (label) marks.push({t0: t, label}); }
@@ -153,8 +173,10 @@ async function play(name, sceneSrc) {
   let frame = 0;
   const tick = async () => {
     const t = frame * step;
-    for (let i = 0; i < cueTimes.length; i++) if (cueTimes[i][0] <= t + 1e-6) { const [, fn] = cueTimes.splice(i--, 1)[0]; fn(); }
-    for (const f of sc.every) if (t >= f.t0 && t < f.t1) f.fn(s, e, t, step, st);
+    try { // a throw here must not leave the render suspended for ever: report it when the render ends
+      for (let i = 0; i < cueTimes.length; i++) if (cueTimes[i][0] <= t + 1e-6) { const [, fn] = cueTimes.splice(i--, 1)[0]; fn(); }
+      for (const f of sc.every) if (t >= f.t0 && t < f.t1) f.fn(s, e, t, step, st);
+    } catch (err) { errors.push(`at ${t.toFixed(2)} s: ${err.message}\n${err.stack}`); }
     frame++;
     const nt = frame * step;
     if (nt < sc.dur - 0.05) ctx.suspend(nt).then(tick);
@@ -171,7 +193,7 @@ async function play(name, sceneSrc) {
     for (let i = 0; i < u8.length; i += 0x8000) str += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
     out.push(btoa(str));
   }
-  return {sr: SR, channels: out, marks};
+  return {sr: SR, channels: out, marks, errors};
 }
 
 /**
@@ -213,6 +235,7 @@ export async function runScenes(exe, names, from = root) {
       for (let i = 0; i < i16.length; i++) f[i] = i16[i] / 32767;
       return f;
     });
+    errors.push(...r.errors.map(m => `${name} ${m}`));
     results.push({name, sr: r.sr, channels, marks: r.marks});
   }
   await browser.close();

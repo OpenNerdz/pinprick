@@ -1,5 +1,5 @@
-#!/data/data/com.termux/files/usr/bin/bash
-# Test and build Pinprick on the phone.
+#!/usr/bin/env bash
+# Test and build Pinprick (on a computer, or on the phone under Termux).
 #   ./build.sh          tests + dist/pinprick.html and dist/artifact.html
 #   ./build.sh apk      also builds and signs android/build/pinprick.apk
 #   ./build.sh smoke    also plays the build in headless Chromium (screenshots in .tmp/shots)
@@ -8,8 +8,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 echo "== tests"
-node --test 'test/*.test.js' 2>&1 | grep -E '^ℹ (tests|pass|fail)|^✖' || true
-node --test 'test/*.test.js' >/dev/null 2>&1 || { echo "tests failed"; exit 1; }
+node --test test/*.test.js 2>&1 | grep -E '^ℹ (tests|pass|fail)|^✖' || true
+node --test test/*.test.js >/dev/null 2>&1 || { echo "tests failed"; exit 1; }
 
 echo "== web build"
 node tools/build.mjs

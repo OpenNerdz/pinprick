@@ -35,7 +35,8 @@ test('standing still with the scanner off, out in the open, it never walks into 
     [s.player.x, s.player.z] = openSpot(s, rng(k * 7 + 1));
     st.wake(s.player);
     let hunted = false;
-    run(s, 0, 60, () => { if (st.state === 'hunt' || st.state === 'alert') hunted = true; return intent(); });
+    // (coming back to where it stood over you, it can hear you breathe: held breath is part of keeping still)
+    run(s, 0, 60, () => { if (st.state === 'hunt' || st.state === 'alert') hunted = true; return {...intent(), holdBreath: st.state === 'linger'}; });
     assert.equal(s.state, 'play', `${def.id} ${diff} seed ${k}: caught standing still`);
     assert.ok(!hunted, `${def.id} ${diff} seed ${k}: it hunted a player it could not hear`);
   }
@@ -85,7 +86,7 @@ test('it never camps the mouth of a crawl it cannot get into', () => {
   st.wake(); st.x = 7; st.z = 13.6; st.notice(7, 10, 0); st.enter('hunt', 0);
   run(s, 0, 40);
   assert.equal(s.state, 'play');
-  assert.ok(st.calm || st.state === 'stalk', `still ${st.state} after 40 s`); // given up the hunt, either way
+  assert.ok(st.calm || st.state === 'stalk' || st.state === 'feint', `still ${st.state} after 40 s`); // given up the hunt, one way or another
   // from here on it goes about its patrol: it does not stand at either end of the crawl
   let atMouth = 0;
   run(s, 40, 20, () => { if (Math.min(Math.hypot(st.x - 7, st.z - 12.5), Math.hypot(st.x - 7, st.z - 7.5)) < 2) atMouth += dt; return intent(); });

@@ -2,7 +2,7 @@
 // scripted scares, and advances them together each frame. The UI talks to it through `ui` hooks
 // and reads its public fields for the HUD.
 
-import {CELL, DIFFICULTY, DOTS, NOISE, PLAYER_R, SCANNER, STALKER, TRACKER} from '../config.js';
+import {CELL, DIFFICULTY, DOTS, LUNGS, NOISE, PLAYER_R, SCANNER, STALKER, TRACKER} from '../config.js';
 import {rng, angleDiff, clamp} from '../util/math.js';
 import {compileLevel, CORE_PICKUP, EXIT_RADIUS, NOTE_PICKUP} from '../world/level.js';
 import {NavGrid} from '../world/nav.js';
@@ -10,6 +10,8 @@ import {levelMesh} from '../render/renderer.js';
 import {Player} from './player.js';
 import {Scanner} from './scanner.js';
 import {Stalker} from './stalker.js';
+import {Memory} from './memory.js';
+import {Stones} from './stones.js';
 import {Scares} from './scares.js';
 import {Signal} from './signal.js';
 import {Tracker} from './tracker.js';
@@ -22,14 +24,25 @@ import {buzz} from '../ui/haptics.js';
 
 const STILL = {moveX: 0, moveY: 0, lookX: 0, lookY: 0, sprint: false, firing: false, sweep: false, crouch: false};
 
+/** What gave you away, for the Caught screen. */
+const CLUES = {
+  walk: 'It heard your footsteps.', run: 'It heard you run.', creep: 'It heard you, even creeping.',
+  scan: "It heard the scanner's hum.", sweep: 'It heard the sweep.', core: 'It heard you lift the core.',
+  tracker: 'It heard your tracker ticking.', breath: 'It heard you breathing.', stone: 'It came to the stone, and found you.',
+  'stone-throw': 'It heard the stone leave your hand.', slam: 'It came to the slam.',
+  echo: 'You moved inside its echo.', light: 'It felt your light, and traced it back.', bump: 'You walked straight into it.',
+  stood: 'You gave yourself away, right beside it.', stalk: 'It had been walking in your footsteps.', other: 'It heard you.',
+};
+
 export class Session {
   /**
-   * opts: {difficulty, seed, renderer, sounds, ui, reduceMotion, demo, lefty, touch}
+   * opts: {difficulty, seed, renderer, sounds, ui, reduceMotion, demo, lefty, touch, memory}
    * ui hooks: say(text, ms), note(note), caught(), won(stats), cores(got, total)
    */
   constructor(def, opts) {
     this.def = def;
-    this.diff = DIFFICULTY[opts.difficulty] || DIFFICULTY.normal;
+    this.diff = {...(DIFFICULTY[opts.difficulty] || DIFFICULTY.normal)};
+    for (const [k, v] of Object.entries(def.tune || {})) this.diff[k] *= v; // how hard this level leans on each number
     this.renderer = opts.renderer; this.sounds = opts.sounds; this.ui = opts.ui;
     this.sounds.setPlace(def.id); // drips in the cistern, creaking steel in the shaft
     this.reduceMotion = !!opts.reduceMotion;
@@ -60,8 +73,21 @@ export class Session {
       this.world.actors.push(this.statue);
       this.statue.place(s.x, s.z, s.face ?? 0, s.lift ?? 0);
     }
+    // what the creature has learned about you, kept between runs (in the browser)
+    this.memory = opts.memory || (this.demo ? new Memory() : Memory.saved());
+    this.memory.enter(def.id, Math.ceil(this.world.w * CELL / 4), Math.ceil(this.world.h * CELL / 4));
     this.stalker = this.L.stalker && !this.demo
-      ? new Stalker(this.L.stalker, this.world, this.nav, this.diff, this.rand, this.sounds, this.playerNav) : null;
+      ? new Stalker(this.L.stalker, this.world, this.nav, this.diff, this.rand, this.sounds, this.playerNav,
+        {memory: this.memory, rand: rng((this.seed ^ 0x9e3779b9) >>> 0), hides: this.L.hides, exit: this.exit}) : null;
+    // stones in your pocket, and your breath
+    this.stones = this.diff.stones;
+    this.noiseFn = (x, z, loud, exact, kind) => this.noise(x, z, loud, exact, kind);
+    this.thrown = new Stones(this.world, this.sounds, this.noiseFn);
+    this.lungs = 1; this.holdingBreath = false; this.breathLock = 0; this.pantT = 0;
+    // a machine that runs on a cycle and drowns out sound (level data: pump: {x, z, every, lasts})
+    this.pump = def.pump ? {...def.pump, on: false, level: 0, t: this.pumpSpan(def.pump.every)} : null;
+    this.stats = {heard: 0, closeCalls: 0, hides: 0};
+    this.lesson = null;
     this.scares = new Scares(this);
     this.decals = buildDecals(this.world.decals);
 
@@ -71,7 +97,6 @@ export class Session {
     this.fx = {black: 0, ping: 0}; // read by the HUD: the blackout after it catches you, the red of its sonar on you
     this.hinted = new Set();
     this.noises = [];
-    this.noiseFn = (x, z, loud, exact, kind) => this.noise(x, z, loud, exact, kind);
     this.coresGot = 0;
     this.meshVersion = -1;
     this.fullSaid = -99;
@@ -93,7 +118,7 @@ export class Session {
   markCheckpoint(x, z, yaw) {
     const tr = this.tracker;
     this.checkpoint = {x, z, yaw, battery: tr ? tr.battery : 0, owned: tr ? tr.owned : false,
-      taken: this.batteries.map(b => b.taken), trackerTaken: !!this.L.tracker?.taken};
+      taken: this.batteries.map(b => b.taken), trackerTaken: !!this.L.tracker?.taken, stones: this.stones};
   }
 
   /** Put the tracker, its charge and the batteries back as a checkpoint or snapshot had them. */
@@ -116,20 +141,23 @@ export class Session {
     this.renderer?.setLevelMesh(levelMesh(this.world, CELL));
   }
 
-  /** Open or close a door by id. Slams are loud. */
+  /** Open or close a door by id. Slams are loud. Returns true if the door moved. */
   setDoor(id, open, loud) {
     const d = id === 'exit' ? {prop: this.L.exitDoor, open: !this.L.exitDoor?.on} : this.L.doors.get(id);
-    if (!d || !d.prop || d.open === open) return;
+    if (!d || !d.prop || d.open === open) return false;
     const p = d.prop, cx = (p.x0 + p.x1) / 2, cz = (p.z0 + p.z1) / 2;
-    if (!open && Math.hypot(this.player.x - cx, this.player.z - cz) < 1.4) return; // never shut on the player
+    if (!open && Math.hypot(this.player.x - cx, this.player.z - cz) < 1.4) return false; // never shut on the player
     d.open = open; p.on = !open;
     this.world.touch();
     this.nav.build(); this.playerNav.build();
+    this.stalker?.belief.rebuild();
+    this.stalker?.regrid();
     if (loud) {
       if (open) this.sounds.doorOpen(); else this.sounds.slam(cx, cz);
-      this.noise(cx, cz, NOISE.slam, false);
+      this.noise(cx, cz, NOISE.slam, false, 'slam');
       buzz(60);
     }
+    return true;
   }
 
   /** ctx shared with the scanner. */
@@ -170,6 +198,10 @@ export class Session {
     p.quiet = p.still > 0.3 && !this.scanner.active;
     p.hidden = p.crouched && !this.scanner.active && !(tr && tr.on) && this.L.hides.some(h => Math.hypot(p.x - h.x, p.z - h.z) < h.r);
 
+    this.breath(dt, intent);
+    if (intent.throwStone) this.throwStone(cam);
+    this.thrown.update(dt, T, this.dots);
+    this.updatePump(dt);
     this.pickups(T);
     this.scares.update(dt, T);
     if (tr) { // before the creature listens, so it hears this frame's tick
@@ -180,8 +212,10 @@ export class Session {
 
     if (this.stalker) {
       const st = this.stalker, w = st.cfg.wake;
-      if (!st.active && typeof w === 'string' && w.startsWith('core:') && this.coresGot >= +w.slice(5)) st.wake(p);
+      if (!st.active && typeof w === 'string' && w.startsWith('core:') && this.coresGot >= +w.slice(5)) st.wake(p, 'patrol', null, this.goalsLeft());
+      const before = st.state;
       st.hear(this.noises, T);
+      if (before !== st.state && (st.state === 'alert' || st.state === 'investigate')) this.stats.heard++;
       if (st.update(dt, T, p)) { this.caught(T, cam, view); return; }
       // first sight of it in a while: a stab of sound and the heart jumps
       if (st.active && st.light > 6 && st.euclid < 18 && T - this.seenAt > 25) {
@@ -210,6 +244,65 @@ export class Session {
 
   syncActors() { this.renderer?.setActors(this.world.actors); }
 
+  /** Where you are likely to be heading next: the cores still out there. */
+  goalsLeft() { return this.cores.filter(c => !c.got); }
+
+  /** Throw a stone where you are looking. */
+  throwStone(cam) {
+    if (this.stones <= 0) { this.ui.say('No stones left.', 1400); return; }
+    this.stones--;
+    const p = this.player, cp = Math.cos(p.pitch);
+    const dx = Math.sin(p.yaw) * cp, dy = Math.sin(p.pitch), dz = -Math.cos(p.yaw) * cp;
+    this.thrown.toss(p.x + dx * 0.3, p.eye - 0.1, p.z + dz * 0.3, dx, dy, dz);
+    this.sounds.throwStone();
+    this.noise(p.x, p.z, NOISE.throw, false, 'stone-throw'); // it can hear your arm, if it is close enough
+    buzz(10);
+  }
+
+  /** Your wind and your lungs. Winded, you pant, and it can hear that. You can stop it: for a while. */
+  breath(dt, intent) {
+    const p = this.player;
+    this.breathLock = Math.max(0, this.breathLock - dt);
+    const want = !!intent.holdBreath && !p.sprinting && this.breathLock <= 0 && this.lungs > 0;
+    if (want && !this.holdingBreath) this.sounds.holdBreath();
+    else if (!want && this.holdingBreath) {
+      if (this.lungs <= 0) { // out of air: you can't help it
+        this.sounds.gasp(); this.noise(p.x, p.z, NOISE.gasp, false, 'breath');
+        this.breathLock = LUNGS.lockout; p.wind = Math.max(p.wind, 0.5);
+        buzz([20, 30, 40]);
+      } else {
+        this.sounds.releaseBreath();
+        if (this.lungs < LUNGS.shaky) this.noise(p.x, p.z, NOISE.gasp * 0.4, false, 'breath');
+      }
+    }
+    this.holdingBreath = want; p.holdingBreath = want;
+    if (want) this.lungs = Math.max(0, this.lungs - dt / this.diff.lungs);
+    else this.lungs = Math.min(1, this.lungs + dt * LUNGS.refill);
+    this.sounds.pant(want ? 0 : clamp(p.wind, 0, 1));
+    if (!want && p.wind > LUNGS.panting && (this.pantT -= dt) <= 0) {
+      this.pantT = LUNGS.every;
+      this.noise(p.x, p.z, NOISE.pant * p.wind, false, 'breath');
+    }
+  }
+
+  pumpSpan([a, b]) { return a + this.rand() * (b - a); }
+
+  /** The level's great pump, on its cycle. While it runs the creature can hardly hear you, wherever you are. */
+  updatePump(dt) {
+    const q = this.pump;
+    if (!q) return;
+    if ((q.t -= dt) <= 0) { q.on = !q.on; q.t = this.pumpSpan(q.on ? q.lasts : q.every); if (q.on) this.hint('pump', 'While the pump runs, it can hardly hear you. Move now.'); }
+    q.level += ((q.on ? 1 : 0) - q.level) * Math.min(1, dt * (q.on ? 1.4 : 0.9));
+    this.sounds.pump(q.x, q.z, q.level);
+    if (this.stalker) this.stalker.masking = q.level;
+  }
+
+  /** For the debug overlay: what the creature is thinking, in a few words. */
+  brainDebug() { return this.stalker && this.stalker.active ? this.stalker.thinking() : null; }
+
+  /** For the debug overlay: where it thinks you might be. */
+  beliefMap() { return this.stalker && this.stalker.active ? this.stalker.belief.map() : null; }
+
   /** Something the creature did that the player should feel, plus a one-time hint the first time. */
   creatureEvent(e) {
     if (e === 'windup') buzz([6, 50, 6, 50, 6]);
@@ -222,6 +315,12 @@ export class Session {
     else if (e === 'flee') this.hint('flee', 'It ran from the light. It will be back.');
     else if (e === 'ping') this.hint('ping', 'It heard the tracker. Up close, it can.');
     else if (e === 'huntclick') this.hint('huntclick', 'It stops to click. Freeze when it clicks; move when it runs.');
+    else if (e === 'closecall') this.stats.closeCalls++;
+    else if (e === 'hid') this.stats.hides++;
+    else if (e === 'wise') this.hint('wise', 'It did not go for the stone. It knows what stones mean now.');
+    else if (e === 'feint') this.hint('feint', 'Its steps are going away. Be sure of that before you move.');
+    else if (e === 'knownhide') this.hint('knownhide', {touch: 'It knows this place. Hold your breath: BREATH.', mouse: 'It knows this place. Hold your breath: B.'});
+    else if (e.startsWith('learned:')) { const l = this.memory.lessonFor(e.slice(8)); if (l) this.hint(e, l); }
   }
 
   /** The tracker's own news. Battery news is said on every difficulty; it is not a hint, you need it. */
@@ -258,10 +357,10 @@ export class Session {
       c.got = true; c.orb.on = false; this.coresGot++;
       this.world.touch();
       this.sounds.core(); buzz(30);
-      this.noise(c.x, c.z, NOISE.core, false);
+      this.noise(c.x, c.z, NOISE.core, false, 'core');
       this.markCheckpoint(p.x, p.z, p.yaw);
       this.ui.cores(this.coresGot, this.cores.length);
-      if (this.coresLeft === 0) this.allCores(T);
+      if (this.coresLeft === 0) this.allCores();
       else this.ui.say(`Core ${this.coresGot} of ${this.cores.length} recovered.`, 3500);
     }
     for (const n of this.notes) {
@@ -302,7 +401,7 @@ export class Session {
       const st = this.stalker;
       // unless it is already on you, the chase starts far from you and the exit, with a shriek
       if (!st.active || !(st.state === 'hunt' || st.state === 'alert') || st.playerDist > 12) st.wake(this.player, 'finale', this.exit);
-      st.enter('finale', this.time);
+      st.enter('finale', st.now);
       msg += ' ' + (this.def.finaleMessage || 'It knows where you are now. Get to the door.');
     }
     this.ui.say(msg, 8000);
@@ -311,6 +410,10 @@ export class Session {
   caught(T, cam, view) {
     this.state = 'caught'; this.caughtT = 0; this.caughtShown = false; this.blacked = false;
     this.deaths++;
+    // what gave you away, and anything it has newly worked out about you
+    const clue = this.stalker && this.stalker.state !== 'finale' ? CLUES[this.stalker.clue] || CLUES.other : null;
+    this.lesson = [clue, this.memory.newLesson()].filter(Boolean).join(' ') || null;
+    this.memory.save();
     this.fearBoost = 1; this.fearNow = 1; this.interference = 0;
     if (this.tracker) { this.tracker.on = false; this.tracker.flood = 1; }
     this.sounds.caught(); this.sounds.updateHum(false, 0, 0); this.sounds.setBreath(0, 0, 0); this.sounds.setDread(1);
@@ -343,22 +446,26 @@ export class Session {
       this.sounds.setDread(0); this.sounds.aftermath();
     }
     this.fx.black = t < 1.05 ? 0 : 1;
-    if (t > 2.0 && !this.caughtShown) { this.caughtShown = true; this.ui.caught(); }
+    if (t > 2.0 && !this.caughtShown) { this.caughtShown = true; this.ui.caught({lesson: this.lesson}); }
     this.syncActors();
   }
 
   /** Back to the last core you picked up, with the creature sent somewhere far away. */
   respawn() {
     const p = this.player, c = this.checkpoint;
-    p.x = c.x; p.z = c.z; p.yaw = c.yaw; p.pitch = 0; p.crouched = false; p.stamina = 1; p.winded = false;
-    this.scanner.heat = 0; this.scanner.overheated = false; this.scanner.charge = 0;
+    p.x = c.x; p.z = c.z; p.yaw = c.yaw; p.pitch = 0; p.crouched = false; p.stamina = 1; p.winded = false; p.wind = 0;
+    this.lungs = 1; this.holdingBreath = false; p.holdingBreath = false; this.breathLock = 0;
+    this.stones = c.stones ?? this.diff.stones; this.thrown.flying.length = 0;
+    this.scanner.heat = 0; this.scanner.overheated = false; this.scanner.charge = 0; this.scanner.sweepP = -1;
+    this.scares.pending.length = 0;
+    this.noises.length = 0;
     this.hands.reset(); this.restoreTracker(c);
     this.fx.black = 0; this.fearBoost = 0; this.sounds.setDread(0);
     if (this.stalker) {
       const st = this.stalker, finale = st.state === 'finale';
-      st.wake(p, finale ? 'finale' : 'patrol', finale ? this.exit : null);
-      if (finale) st.enter('finale', this.time);
-      else { st.graceFor = STALKER.respawnGrace; st.avoid = {x: c.x, z: c.z}; }
+      st.wake(p, finale ? 'finale' : 'patrol', finale ? this.exit : null, this.goalsLeft());
+      if (finale) st.enter('finale', st.now);
+      else { st.graceFor = STALKER.respawnGrace; st.avoid = {x: c.x, z: c.z}; st.director.rest(STALKER.respawnGrace); }
     }
     this.state = 'play';
   }
@@ -367,7 +474,9 @@ export class Session {
     this.state = 'won';
     this.sounds.updateHum(false, 0, 0); this.sounds.setBreath(0, 0, 0); this.sounds.setDread(0);
     this.sounds.win();
-    this.ui.won({time: this.time, dots: this.dots ? this.dots.total : 0, deaths: this.deaths, notes: this.notes.filter(n => n.read).length, notesTotal: this.notes.length});
+    this.memory.save();
+    this.ui.won({time: this.time, dots: this.dots ? this.dots.total : 0, deaths: this.deaths, notes: this.notes.filter(n => n.read).length, notesTotal: this.notes.length,
+      learned: this.stalker ? this.memory.lessons() : [], ...this.stats});
   }
 
   /** Title-screen demo: the scanner sweeps a fixed spot on its own. */
@@ -380,8 +489,11 @@ export class Session {
 
   snapshot() {
     const p = this.player, tr = this.tracker;
+    this.memory.save();
     return {x: p.x, z: p.z, yaw: p.yaw, pitch: p.pitch, time: this.time, deaths: this.deaths,
-      got: this.cores.map(c => c.got), seed: this.seed, checkpoint: this.checkpoint,
+      got: this.cores.map(c => c.got), seed: this.seed, checkpoint: this.checkpoint, stones: this.stones, stats: this.stats,
+      crouched: p.crouched, read: this.notes.map(n => n.read), fired: this.L.triggers.map(t => t.fired),
+      doors: [...this.L.doors.values()].map(q => [q.id, q.open]), sweepCooldown: this.scanner.cooldown,
       tracker: tr ? {battery: tr.battery, owned: tr.owned, taken: this.batteries.map(b => b.taken), trackerTaken: !!this.L.tracker?.taken} : null};
   }
 
@@ -390,6 +502,13 @@ export class Session {
     const p = this.player;
     if (isFinite(d.x) && isFinite(d.z)) { p.x = d.x; p.z = d.z; p.yaw = d.yaw || 0; p.pitch = d.pitch || 0; }
     this.time = d.time || 0; this.deaths = d.deaths || 0;
+    if (d.stones != null) this.stones = d.stones;
+    if (d.stats) Object.assign(this.stats, d.stats);
+    if (d.crouched) { p.crouched = true; p.crouchT = 1; }
+    (d.read || []).forEach((r, i) => { if (this.notes[i]) this.notes[i].read = !!r; });
+    (d.fired || []).forEach((f, i) => { if (this.L.triggers[i]) this.L.triggers[i].fired = !!f; });
+    for (const [id, open] of d.doors || []) this.setDoor(id, open, false);
+    if (d.sweepCooldown) this.scanner.cooldown = d.sweepCooldown;
     if (d.checkpoint) this.checkpoint = d.checkpoint;
     (d.got || []).forEach((g, i) => {
       const c = this.cores[i];

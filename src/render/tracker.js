@@ -106,14 +106,14 @@ export class TrackerRenderer {
     this.gl = gl;
     const mk = (type, src) => {
       const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS) && !gl.isContextLost()) console.error(gl.getShaderInfoLog(s));
       return s;
     };
     const p = gl.createProgram();
     gl.attachShader(p, mk(gl.VERTEX_SHADER, DEVICE_VS)); gl.attachShader(p, mk(gl.FRAGMENT_SHADER, FS));
     ['aPos', 'aNrm', 'aUv', 'aMat'].forEach((a, i) => gl.bindAttribLocation(p, i, a));
     gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS) && !gl.isContextLost()) console.error(gl.getProgramInfoLog(p));
     this.p = p;
     this.u = {};
     for (const n of ['uProj', 'uModel', 'uA', 'uB', 'uC', 'uK']) this.u[n] = gl.getUniformLocation(p, n);

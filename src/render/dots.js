@@ -15,11 +15,19 @@ export class DotBuffer {
     this.markT = new Float64Array(8192);
     this.markW = new Float64Array(8192);
     this.markHead = 0; this.markTail = 0;
+    this.range = [0, 0];       // endFrame's answer, reused so a frame allocates nothing
   }
 
+  /** Forget every dot on screen. `total` keeps counting: the dots were still thrown. */
   clear() {
-    this.written = 0; this.flushed = 0; this.total = 0;
+    this.written = 0; this.flushed = 0;
     this.markHead = this.markTail = 0;
+  }
+
+  /** A new run: the screen and the count. */
+  reset() {
+    this.clear();
+    this.total = 0;
   }
 
   push(x, y, z, t, r, g, b, size) {
@@ -42,7 +50,8 @@ export class DotBuffer {
       }
     }
     this.flushed = to;
-    return [Math.max(from, to - this.cap), to];
+    this.range[0] = Math.max(from, to - this.cap); this.range[1] = to;
+    return this.range;
   }
 
   /** First still-visible dot (as a monotonic index) for dots that live `life` seconds. */

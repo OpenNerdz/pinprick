@@ -7,7 +7,7 @@
 // the shaders' formulas (the tracker's screen reduced to its rings and blips).
 // Game logic, HUD and screens are the real thing; only the final pixels are substituted.
 import {chromium} from 'playwright-core';
-import {mkdirSync} from 'node:fs';
+import {existsSync, mkdirSync} from 'node:fs';
 import {join, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -15,7 +15,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, '.tmp/shots');
 mkdirSync(out, {recursive: true});
 const url = 'file://' + join(root, 'dist/pinprick.html') + '#debug-nopoints';
-const exe = process.argv[2] || '/data/data/com.termux/files/usr/bin/chromium-browser';
+const exe = process.argv[2] || ['/data/data/com.termux/files/usr/bin/chromium-browser', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].find(existsSync);
 
 const browser = await chromium.launch({
   executablePath: exe, headless: true,

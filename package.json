@@ -4,7 +4,7 @@
   "description": "A horror game you can only see through scanner dots",
   "scripts": {
     "build": "node tools/build.mjs",
-    "test": "node --test 'test/*.test.js'",
+    "test": "node --test test/*.test.js",
     "smoke": "node tools/smoke.mjs"
   },
   "type": "module",

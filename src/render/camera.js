@@ -21,6 +21,7 @@ export class Camera {
     this.aspect = w / h;
     // keep the horizontal view near 66 degrees in portrait, open up a little in landscape
     this.vfov = Math.max(62 * DEG, Math.min(100 * DEG, 2 * Math.atan(Math.tan(33 * DEG) / this.aspect)));
+    this.build(); // set() does not run while paused, and the picture must not stretch until it does
   }
 
   set(ex, ey, ez, yaw, pitch) {

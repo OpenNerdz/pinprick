@@ -5,8 +5,9 @@ import intake from './intake.js';
 import sublevel from './sublevel.js';
 import cistern from './cistern.js';
 import shaft from './shaft.js';
+import pumphall from './pumphall.js';
 
-export const LEVELS = [intake, sublevel, cistern, shaft];
+export const LEVELS = [intake, sublevel, cistern, shaft, pumphall];
 
 /** Where the title screen's background demo stands and looks. */
 export const ATTRACT = {level: sublevel, pose: {x: 19, z: 24.6, yaw: 0, pitch: 0.13}};

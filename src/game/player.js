@@ -1,7 +1,7 @@
 // The player's body: walking, sprinting on a stamina bar, crouching (quiet, slow, fits crawlspaces),
 // footsteps and the noise they make.
 
-import {EYE, EYE_CROUCH, PLAYER, PLAYER_R, NOISE} from '../config.js';
+import {EYE, EYE_CROUCH, LUNGS, PLAYER, PLAYER_R, NOISE} from '../config.js';
 import {clamp} from '../util/math.js';
 import {collide} from '../world/collision.js';
 
@@ -17,6 +17,8 @@ export class Player {
     this.still = 0;              // seconds without moving, for the signal reading
     this.hidden = false;
     this.quiet = false;          // still and not scanning: set by the session each frame
+    this.wind = 0;               // 0 fresh .. 1 winded: sprinting raises it, and it can hear you panting
+    this.holdingBreath = false;  // set by the session each frame
     this.eye = EYE;
     this.probe = {x: 0, z: 0};
   }
@@ -46,8 +48,9 @@ export class Player {
     if (intent.crouch) {
       if (!this.setCrouch(!this.crouched, world)) msg = 'Too low to stand up here.';
     }
-    const moving = Math.hypot(intent.moveX, intent.moveY);
-    this.moveAmt = Math.min(1, moving);
+    // a stick barely off centre is no movement at all, or you could creep silently past everything
+    const moving = Math.hypot(intent.moveX, intent.moveY), push = moving > 0.15 ? 1 : 0;
+    this.moveAmt = Math.min(1, moving) * push;
 
     // sprint: stands you up, drains stamina, refuses while winded
     let wantSprint = intent.sprint && this.moveAmt > 0.5 && intent.moveY > 0.2 && !this.winded;
@@ -56,16 +59,20 @@ export class Player {
     if (this.sprinting) {
       this.stamina = Math.max(0, this.stamina - PLAYER.staminaDrain * dt);
       this.staminaWait = PLAYER.staminaDelay;
-      if (this.stamina === 0) { this.winded = true; sounds.breathe(); }
-    } else if ((this.staminaWait -= dt) <= 0) {
-      this.stamina = Math.min(1, this.stamina + PLAYER.staminaRegen * dt);
-      if (this.winded && this.stamina > 0.35) this.winded = false;
+      this.wind = Math.min(1, this.wind + LUNGS.windRise * dt);
+      if (this.stamina === 0) { this.winded = true; this.wind = 1; sounds.breathe(); }
+    } else {
+      this.wind = Math.max(0, this.wind - LUNGS.windFade * dt);
+      if ((this.staminaWait -= dt) <= 0) {
+        this.stamina = Math.min(1, this.stamina + PLAYER.staminaRegen * dt);
+        if (this.winded && this.stamina > 0.35) this.winded = false;
+      }
     }
 
     const speed = this.crouched ? PLAYER.crouch : this.sprinting ? PLAYER.sprint : PLAYER.walk;
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw), sp = speed * dt;
-    this.x += (sy * intent.moveY + cy * intent.moveX) * sp;
-    this.z += (-cy * intent.moveY + sy * intent.moveX) * sp;
+    this.x += (sy * intent.moveY + cy * intent.moveX) * sp * push;
+    this.z += (-cy * intent.moveY + sy * intent.moveX) * sp * push;
     collide(world, this, PLAYER_R, this.crouched ? CROUCH_H : STAND_H);
 
     // footsteps: a sound for you, a noise for it

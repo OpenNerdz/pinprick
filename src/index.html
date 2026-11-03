@@ -15,21 +15,32 @@
     <div class="row"><span class="lab" id="sig-lab">Signal</span><span id="sig"><i></i><i></i><i></i><i></i><i></i></span><span id="sig-note"></span></div>
     <div class="row"><span class="lab">Heat</span><span class="meter" id="heat"><i></i></span></div>
     <div class="row"><span class="lab">Sweep</span><span id="swp">Ready</span></div>
+    <div class="row" id="stone-row" hidden><span class="lab">Stones</span><span id="stones">0</span></div>
     <div class="row" id="trk-row" hidden><span class="lab">Tracker</span><span class="meter" id="trk"><i></i></span><span id="trk-note"></span></div>
-    <div class="row" id="stamina-row" hidden><span class="lab">Breath</span><span class="meter" id="stamina"><i></i></span></div>
+    <div class="row" id="stamina-row" hidden><span class="lab">Stamina</span><span class="meter" id="stamina"><i></i></span></div>
+    <div class="row" id="lung-row" hidden><span class="lab">Lungs</span><span class="meter" id="lungs"><i></i></span></div>
     <div class="row" id="hidden-row" hidden><span class="tag">Hidden</span></div>
   </div>
   <div id="topbar">
     <button id="snd" type="button">Sound on</button>
     <button id="pause" type="button" hidden aria-label="Pause"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="3.5" height="12"/><rect x="9.5" y="2" width="3.5" height="12"/></svg></button>
   </div>
-  <div id="msg" role="status"></div>
+  <div id="msg" role="status"><span id="msg-text"></span></div>
+  <ul id="captions"></ul>
 
   <div id="stick" hidden><i></i></div>
   <div id="crouch" class="pad small" hidden aria-hidden="true"><span>CROUCH</span></div>
   <div id="track" class="pad tiny" hidden aria-hidden="true">
     <svg viewBox="0 0 56 56"><circle class="track" cx="28" cy="28" r="25"/><circle class="fill" id="trackfill" cx="28" cy="28" r="25"/></svg>
     <span id="tracklab">TRACK</span>
+  </div>
+  <div id="breath" class="pad tiny" hidden aria-hidden="true">
+    <svg viewBox="0 0 56 56"><circle class="track" cx="28" cy="28" r="25"/><circle class="fill" id="breathfill" cx="28" cy="28" r="25"/></svg>
+    <span>BREATH</span>
+  </div>
+  <div id="throw" class="pad tiny" hidden aria-hidden="true">
+    <svg viewBox="0 0 56 56"><circle class="track" cx="28" cy="28" r="25"/></svg>
+    <span>THROW<small id="throwcount">0</small></span>
   </div>
   <div id="sweep" class="pad mid" hidden aria-hidden="true">
     <svg viewBox="0 0 64 64"><circle class="track" cx="32" cy="32" r="29"/><circle class="fill" id="sweepfill" cx="32" cy="32" r="29"/></svg>
@@ -59,10 +70,13 @@
       <p class="note" id="diff-blurb"></p>
     </div>
     <div class="actions">
+      <button id="continue" class="cta" type="button" hidden>Continue</button>
       <button id="go" class="cta" type="button">Start</button>
+      <button id="open-controls" class="ghost" type="button">Controls</button>
       <button id="open-settings" class="ghost" type="button">Settings</button>
     </div>
-    <p class="note" id="note">Better with headphones. It hunts by sound.</p>
+    <p class="note" id="note">Better with headphones. It hunts by sound. No sound? Settings has captions.</p>
+    <p class="note" id="pad-note" hidden>Controller ready: D-pad to move, A to choose, Start to play.</p>
     </div>
     </div>
   </section>
@@ -70,33 +84,46 @@
   <!-- pause -->
   <section id="paused" class="sheet" hidden>
     <span class="eyebrow" id="pause-level"></span>
-    <h1>Paused</h1>
+    <h1 class="dots minor">Paused</h1>
     <p class="lede" id="pause-goal"></p>
     <ul class="how" id="pause-how"></ul>
     <div class="actions">
       <button id="resume" class="cta" type="button">Resume</button>
-      <button id="restart" class="ghost" type="button">Restart level</button>
+      <button id="pause-controls" class="ghost" type="button">Controls</button>
       <button id="pause-settings" class="ghost" type="button">Settings</button>
+      <button id="restart" class="ghost" type="button">Restart level</button>
       <button id="quit" class="ghost" type="button">Quit to title</button>
     </div>
   </section>
 
   <!-- settings -->
-  <section id="settings" class="sheet" hidden>
-    <h1>Settings</h1>
+  <section id="settings" class="sheet veil" hidden>
+    <h1 class="dots minor">Settings</h1>
     <div class="form">
-      <label class="field" for="set-look"><span>Look speed</span><input id="set-look" type="range" min="0.4" max="2.2" step="0.1"><output id="out-look"></output></label>
-      <label class="field" for="set-volume"><span>Volume</span><input id="set-volume" type="range" min="0" max="1" step="0.05"><output id="out-volume"></output></label>
+      <label class="field" for="set-look"><span>Look speed</span><input id="set-look" type="range" min="0.4" max="2.2" step="0.1" aria-label="Look speed"><output id="out-look"></output></label>
+      <label class="field" for="set-volume"><span>Volume</span><input id="set-volume" type="range" min="0" max="1" step="0.05" aria-label="Volume"><output id="out-volume"></output></label>
+      <label class="check" for="set-captions"><input id="set-captions" type="checkbox"><span>Captions for sounds: what, which way, how far</span></label>
       <label class="check" for="set-invert"><input id="set-invert" type="checkbox"><span>Invert look up and down</span></label>
       <label class="check" for="set-swap"><input id="set-swap" type="checkbox"><span>Left-handed controls (stick on the right)</span></label>
       <label class="check" for="set-haptics"><input id="set-haptics" type="checkbox"><span>Vibration</span></label>
       <label class="check" for="set-saver"><input id="set-saver" type="checkbox"><span>Battery saver (lower resolution)</span></label>
+      <label class="check" for="set-quality" id="set-quality-row" hidden><input id="set-quality" type="checkbox"><span>Lighter graphics (for slow machines)</span></label>
+      <label class="check" for="set-motion"><input id="set-motion" type="checkbox"><span>Reduce motion (no shake, no sway)</span></label>
+      <label class="check" for="set-fullscreen" id="set-fullscreen-row" hidden><input id="set-fullscreen" type="checkbox"><span>Full screen</span></label>
     </div>
     <div class="actions">
       <button id="settings-back" class="cta" type="button">Done</button>
+      <button id="forget" class="ghost danger" type="button">Make it forget</button>
       <button id="reset-progress" class="ghost danger" type="button">Reset progress</button>
     </div>
     <p class="note" id="reset-note" hidden></p>
+  </section>
+
+  <!-- every control, for every way of playing -->
+  <section id="controls" class="sheet veil" hidden>
+    <h1 class="dots minor">Controls</h1>
+    <div class="control-sets" id="control-sets"></div>
+    <div class="actions"><button id="controls-back" class="cta" type="button">Done</button></div>
   </section>
 
   <!-- note -->
@@ -111,6 +138,10 @@
   <section id="caught" class="sheet red" hidden>
     <h1 class="dots danger">Caught</h1>
     <p class="lede" id="caught-text">It found you.</p>
+    <div class="lesson" id="caught-lesson" hidden>
+      <span class="eyebrow">It learned</span>
+      <p id="caught-lesson-text"></p>
+    </div>
     <div class="actions">
       <button id="retry" class="cta" type="button">Back to the last core</button>
       <button id="caught-quit" class="ghost" type="button">Quit to title</button>
@@ -120,7 +151,10 @@
   <!-- level complete -->
   <section id="won" class="sheet" hidden>
     <span class="eyebrow" id="won-level"></span>
-    <h1 class="dots">Out</h1>
+    <div class="won-head">
+      <h1 class="dots">Out</h1>
+      <div class="grade" id="grade" hidden><b id="grade-letter"></b><small id="grade-word"></small></div>
+    </div>
     <p class="lede" id="won-text"></p>
     <div class="stats">
       <div><span>Time</span><b id="st-time">0:00</b></div>
@@ -129,12 +163,18 @@
       <div><span>Notes</span><b id="st-notes">0</b></div>
       <div><span>Dots</span><b id="st-dots">0</b></div>
     </div>
+    <div class="stats debrief" id="debrief" hidden></div>
+    <div class="lesson" id="won-learned" hidden>
+      <span class="eyebrow">What it learned about you</span>
+      <ul id="won-learned-list"></ul>
+    </div>
     <div class="actions">
       <button id="next" class="cta" type="button">Next level</button>
       <button id="again" class="ghost" type="button">Play again</button>
       <button id="won-quit" class="ghost" type="button">Title</button>
     </div>
   </section>
+  <div id="sheetfx" aria-hidden="true"></div>
 </div>
 
 <script>/*SCRIPT*/</script>
