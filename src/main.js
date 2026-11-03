@@ -15,7 +15,7 @@ import {Captions} from './ui/captions.js';
 import {DotWord, PALETTES} from './ui/dotword.js';
 import {BrainView} from './ui/debugview.js';
 import {menuMove, menuAccept, focusPrimary, primaryOf} from './ui/menu.js';
-import {keyboardRows, dragRows, touchRows, padRows, rowsHtml} from './ui/controls.js';
+import {controlSets, tabsHtml, panelsHtml, shortHtml, linkControls} from './ui/controls.js';
 import {gradeRun, parFor, debriefRows, learnedLines} from './ui/debrief.js';
 import {Session} from './game/session.js';
 import {LEVELS, ATTRACT} from './levels/index.js';
@@ -99,7 +99,7 @@ function boot(hotData) {
 
   // ------------------------------------------------------------ the run in progress
   function saveRun() {
-    if (!session || session.state !== 'play') return; // caught or out: nothing worth coming back to
+    if (!session || (session.state !== 'play' && session.state !== 'caught')) return; // out: nothing worth coming back to
     try {
       save(RUN, {v: 1, id: LEVELS[levelIndex].id, level: levelIndex, difficulty: settings.difficulty, snap: session.snapshot()});
     } catch (e) { /* better no save than a broken pause */ }
@@ -194,21 +194,32 @@ function boot(hotData) {
     $('reset-note').hidden = true;
   }
 
+  let controlsTab = null, controlsDrawn = '';
+  /** Which way of playing is in use right now. */
+  const usingSet = () => (input.padActive ? 'pad' : input.touch ? 'touch' : input.noLock ? 'drag' : 'keys');
   function renderHow() {
-    const pointer = input.noLock ? dragRows() : keyboardRows();
-    const rows = input.padActive ? padRows() : input.touch ? touchRows(settings.swap) : pointer;
-    const html = rowsHtml(rows);
+    const sets = controlSets({noLock: input.noLock, lefty: settings.swap}), using = usingSet();
+    const html = shortHtml(sets.find(q => q.id === using));
     $('how').innerHTML = html;
     $('pause-how').innerHTML = html;
-    // every way of playing, the one you are using first
-    const sets = [
-      ['Controller', padRows(), input.padActive],
-      ['Touch', touchRows(settings.swap), !input.padActive && input.touch],
-      ['Keyboard and mouse', pointer, !input.padActive && !input.touch],
-    ].sort((a, b) => b[2] - a[2]);
-    $('control-sets').innerHTML = sets.map(([name, list, now]) =>
-      `<section><span class="eyebrow${now ? ' now' : ''}">${name}</span><ul class="how">${rowsHtml(list)}</ul></section>`).join('');
+    // picking up a controller while the sheet is open shows you the controller
+    if (!sets.some(q => q.id === controlsTab) || (app === 'controls' && controlsDrawn && !controlsDrawn.startsWith(using + '|'))) controlsTab = using;
+    const portrait = innerHeight > innerWidth, key = [using, controlsTab, input.noLock, settings.swap, portrait].join('|');
+    if (key === controlsDrawn) return;
+    controlsDrawn = key;
+    const focused = document.activeElement?.id;
+    $('ctl-tabs').innerHTML = tabsHtml(sets, controlsTab, using);
+    $('control-sets').innerHTML = panelsHtml(sets, controlsTab, {lefty: settings.swap, portrait});
+    if (focused?.startsWith('ctl-tab-')) $(focused)?.focus();
   }
+  $('ctl-tabs').addEventListener('click', e => {
+    const tab = e.target.closest('[data-tab]');
+    if (!tab || tab.dataset.tab === controlsTab) return;
+    sounds.click();
+    controlsTab = tab.dataset.tab;
+    renderHow();
+  });
+  linkControls($('control-sets'));
 
   // ------------------------------------------------------------ title
   const unlocked = i => i === 0 || !!progress.cleared[LEVELS[i - 1].id];
@@ -285,8 +296,8 @@ function boot(hotData) {
       say, note: openNote, caught: showCaught, won: showWon,
       cores: () => {},
     };
-    const make = seed => new Session(def, {difficulty: settings.difficulty, renderer, sounds, ui, reduceMotion, seed, lefty: settings.swap, touch: input.touch});
-    session = make(snap?.seed);
+    const make = (seed, resume = false) => new Session(def, {difficulty: settings.difficulty, renderer, sounds, ui, reduceMotion, seed, resume, lefty: settings.swap, touch: input.touch});
+    session = make(snap?.seed, !!snap);
     if (snap) {
       try { session.restore(snap); } catch (e) { forget(RUN); session = make(); snap = null; } // a save from another build: start over rather than crash
     }
@@ -348,6 +359,7 @@ function boot(hotData) {
   }
 
   function showCaught(info) {
+    saveRun(); // a reload from here still counts this, and comes back at the last core
     app = 'caught';
     input.enabled = false; input.releaseAll(); input.exitLock();
     const d = session.deaths;
@@ -422,7 +434,7 @@ function boot(hotData) {
     return disarm;
   }
   const inDeep = () => !!session && session.time > WORTH_ASKING;
-  const disarmPause = pressTwice('restart', 'Press again to restart', inDeep, () => startLevel(levelIndex));
+  const disarmPause = pressTwice('restart', 'Press again to restart', inDeep, () => { forget(RUN); startLevel(levelIndex); });
   click('quit', () => { saveRun(); toTitle(true); }); // nothing lost: the title offers to continue
 
   click('go', () => { forget(RUN); startLevel(selected); });
@@ -447,7 +459,7 @@ function boot(hotData) {
     if (settingsFrom === 'paused') { app = 'paused'; engine.suspend(true); disarmPause(); show('paused'); }
     else { app = 'title'; renderLevels(); show('title'); }
   });
-  const openControls = from => { controlsFrom = from; app = 'controls'; renderHow(); show('controls'); $('controls').scrollTop = 0; };
+  const openControls = from => { controlsFrom = from; controlsTab = usingSet(); app = 'controls'; renderHow(); show('controls'); $('controls').scrollTop = 0; };
   click('open-controls', () => openControls('title'));
   click('pause-controls', () => openControls('paused'));
   click('controls-back', () => {

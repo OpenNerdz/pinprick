@@ -95,6 +95,7 @@ export class Stalker {
     this.lingerFor = 0; this.lingerKnown = false; this.breathT = 0; this.sniffed = false;
     this.stoodAt = null;                  // where it last stood over someone it could not quite find
     this.guessing = false;                // searching on a hunch, not because it ever had you
+    this.fixAt = -99;                     // when it last truly placed you
     this.blocked = 0;                     // times in a row every way on has led past you
     this.hideNoted = false; this.closeAt = -99;
     this.masking = 0;                     // 0..1: how much a machine nearby is drowning out what it hears
@@ -170,6 +171,7 @@ export class Stalker {
     this.stuck = 0; this.lungeT = 0; this.stumbleT = 0; this.timer = 0; this.recoilT = 0; this.tense = 0;
     this.pulseIn = -1; this.pinned = false; this.surgeT = 0; this.pinFor = 0; this.burnT = 0; this.echoT = -1; this.followD = STALKER.followFar;
     this.echoRays = 0; this.afterPing = false; this.waylaying = false; this.cutoff = null; this.doubled = false; this.arousal = 0;
+    this.exposed = false; this.guessing = false; this.fixAt = -99; this.clue = null; this.lingerKnown = false; this.feintPhase = 'away';
     this.belief.uniform();
     this.prevHits = this.actor.hits;
     this.nav.field(this.x, this.z, this.field);
@@ -294,7 +296,7 @@ export class Stalker {
       this.fixVel.x += (vx - this.fixVel.x) * k; this.fixVel.z += (vz - this.fixVel.z) * k;
     } else if (gap >= 3) { this.fixVel.x = 0; this.fixVel.z = 0; }
     if (gap > 0) this.fixT = T;
-    this.lastKnown.x = x; this.lastKnown.z = z; this.sinceFix = 0; this.guessing = false;
+    this.lastKnown.x = x; this.lastKnown.z = z; this.sinceFix = 0; this.guessing = false; this.fixAt = T;
     this.arousal = Math.min(1, this.arousal + 0.25);
     this.fixFrom.x = this.x; this.fixFrom.z = this.z; // where it stood: the near side of wherever you went
   }
@@ -327,11 +329,18 @@ export class Stalker {
   /** Whether, having lost you, it follows your footsteps this time (difficulty, and not right after a respawn). */
   wantsStalk(T) { return T > this.stalkAfter && this.graceFor <= 0 && !this.director.relaxing && this.rand() < this.diff.stalk; }
 
-  /** A door has come down, or the ground has changed: if it was standing there, it is now just to one side. */
+  /**
+   * A door has come down, or the ground has changed: if it was standing there, it is now just to one side.
+   * Of the two sides of a door, the one away from you: a slam never shoves it through at you.
+   */
   regrid() {
     if (!this.active || this.nav.walkableAt(this.x, this.z)) return;
-    const at = this.nav.nearest(this.x, this.z, 4);
-    if (at >= 0) { this.x = this.nav.cx(at); this.z = this.nav.cz(at); this.repathT = 0; }
+    const {nav, player: p} = this, at = nav.nearest(this.x, this.z, 4);
+    if (at < 0) return;
+    let x = nav.cx(at), z = nav.cz(at);
+    const ox = 2 * this.x - x, oz = 2 * this.z - z; // the same step the other way
+    if (p && nav.walkableAt(ox, oz) && Math.hypot(ox - p.x, oz - p.z) > Math.hypot(x - p.x, z - p.z)) { x = ox; z = oz; }
+    this.x = x; this.z = z; this.repathT = 0;
   }
 
   /** The longest it listens when it means it: a breath held from the start can always be let go quietly afterwards. */
@@ -446,7 +455,7 @@ export class Stalker {
   /** You have just gone to ground with it after you: it takes note of where. */
   noteHiding(player) {
     if (!player.hidden) { this.hideNoted = false; return; }
-    if (this.hideNoted || !(this.hunting || this.state === 'alert' || this.state === 'search' || this.state === 'linger' || this.sinceFix < 6)) return;
+    if (this.hideNoted || !(this.hunting || this.state === 'alert' || (this.state === 'search' && !this.guessing) || this.state === 'linger' || this.now - this.fixAt < 6)) return;
     this.hideNoted = true;
     let at = -1, bd = Infinity;
     this.hides.forEach((h, i) => { const d = Math.hypot(player.x - h.x, player.z - h.z); if (d < bd) { bd = d; at = i; } });
@@ -858,7 +867,7 @@ export class Stalker {
         if (this.sinceFix > STALKER.stalkPatience) { this.target = null; this.enter('listen', T); break; }
         if (this.tense > 0) { // it heard the scanner start: frozen, listening; then it comes
           listening = true;
-          if ((this.tense -= dt) <= 0) { this.fix(player.x, player.z, T); this.enter('hunt', T); }
+          if ((this.tense -= dt) <= 0) this.enter('hunt', T); // for where it heard you, not where you have got to
           break;
         }
         const moving = player.still < 0.25 && !player.hidden;

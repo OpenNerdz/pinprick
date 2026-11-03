@@ -22,9 +22,9 @@ function sounds() {
   return new Proxy({e: {listener: {x: 0, z: 0, yaw: 0}}, played}, {get: (t, k) => (k in t ? t[k] : () => { played[k] = (played[k] || 0) + 1; })});
 }
 const renderer = () => { const dots = {push: noop, total: 0, clear: noop}; return {setDots: () => dots, setGhosts: noop, setLevelMesh: noop, setActors: noop, addLine: noop, addFan: noop}; };
-const make = (def, difficulty = 'normal', seed = 3, memory = new Memory()) => {
+const make = (def, difficulty = 'normal', seed = 3, memory = new Memory(), opts = {}) => {
   const says = [], caught = [];
-  const s = new Session(def, {difficulty, seed, memory, renderer: renderer(), sounds: sounds(), ui: {say: t => says.push(t), note: noop, caught: i => caught.push(i), won: noop, cores: noop}});
+  const s = new Session(def, {...opts, difficulty, seed, memory, renderer: renderer(), sounds: sounds(), ui: {say: t => says.push(t), note: noop, caught: i => caught.push(i), won: noop, cores: noop}});
   return {s, says, caught, st: s.stalker, p: s.player, played: s.sounds.played};
 };
 const intent = (o = {}) => ({moveX: 0, moveY: 0, sprint: false, lookX: 0, lookY: 0, firing: false, sweep: false, crouch: false, ...o});
@@ -506,6 +506,116 @@ test('seeing through a stone, it comes looking, but it does not know: keep still
   }
 });
 
+// ---------------------------------------------------------------- picking a run back up
+
+const reload = (def, snap, memory = new Memory()) => {
+  const again = make(def, 'normal', snap.seed, memory, {resume: true});
+  again.s.restore(snap);
+  return again;
+};
+const level = id => LEVELS.find(l => l.id === id);
+
+test('picking a saved run back up, it is a long walk away, even if you saved beside where it starts', () => {
+  const def = level('shaft'), {s, p} = make(def);
+  p.x = def.stalker.spawn[0] + 1.5; p.z = def.stalker.spawn[1];
+  const {s: s2, st, p: p2} = reload(def, s.snapshot());
+  assert.ok(s2.nav.distAt(s2.nav.field(p2.x, p2.z), st.x, st.z) > 12, `${st.x},${st.z}`);
+  run(s2, 0, 3, () => intent({moveY: 1}));
+  assert.equal(s2.state, 'play');
+});
+
+test('it is awake when you come back if it was awake when you left, and asleep if it was asleep', () => {
+  const def = level('sublevel');
+  const asleep = make(def);
+  assert.ok(!asleep.st.active);
+  assert.ok(!reload(def, asleep.s.snapshot()).st.active);
+  asleep.st.wake();
+  assert.ok(reload(def, asleep.s.snapshot()).st.active);
+});
+
+test('quitting does not shake it off: if it was after you, it still is, from a distance', () => {
+  const def = level('cistern'), {s, st, p} = make(def);
+  st.notice(p.x, p.z, 0); st.enter('hunt', 0);
+  const again = reload(def, s.snapshot());
+  assert.ok(again.st.hunting || again.st.state === 'alert', again.st.state);
+  assert.ok(Math.hypot(again.st.x - p.x, again.st.z - p.z) > 8);
+});
+
+test('the same run picked back up forgets nothing; a new visit forgets a little', () => {
+  const def = level('cistern'), memory = new Memory();
+  memory.data.habits.hide = 10;
+  make(def, 'normal', 3, memory, {resume: true});
+  assert.equal(memory.data.habits.hide, 10);
+  make(def, 'normal', 3, memory);
+  assert.ok(memory.data.habits.hide < 10);
+});
+
+test('a door saved shut comes back shut, even with you beside it', () => {
+  const def = level('cistern'), {s, p} = make(def), id = def.doors[0].id, d = s.L.doors.get(id);
+  assert.ok(s.setDoor(id, false, false, true));
+  const prop = d.prop; p.x = (prop.x0 + prop.x1) / 2 + 1.1; p.z = (prop.z0 + prop.z1) / 2;
+  assert.equal(reload(def, s.snapshot()).s.L.doors.get(id).open, false);
+});
+
+test('a door about to slam still slams, after a respawn or a reload', () => {
+  const def = level('shaft'), {s, p} = make(def);
+  const i = s.L.triggers.findIndex(t => t.actions.some(a => a[0] === 'slam')), t = s.L.triggers[i];
+  s.coresGot = t.cores ?? 0; p.x = t.x; p.z = t.z;
+  t.delay = 5;
+  run(s, 0, 0.1);
+  assert.ok(t.fired && s.scares.waiting(t), 'fired, and waiting');
+  assert.equal(s.snapshot().fired[i], false, 'saved as not yet fired');
+  s.respawn();
+  assert.equal(t.fired, false, 'free to fire again');
+});
+
+test('the statue stays where it moved to', () => {
+  const def = LEVELS.find(l => make(l).s.statue);
+  const {s} = make(def);
+  s.statue.place(s.statue.x + 2, s.statue.z, s.statue.face, 0);
+  const x = s.statue.x;
+  assert.equal(reload(def, s.snapshot()).s.statue.x, x);
+});
+
+test('reloading on the Caught screen comes back at the last core, not hunted', () => {
+  const def = level('cistern'), {s, st, p} = make(def);
+  s.checkpoint = {...s.checkpoint, x: p.x, z: p.z};
+  const cx = p.x, cz = p.z;
+  p.x += 3; st.enter('hunt', 0); s.state = 'caught';
+  const snap = s.snapshot();
+  assert.equal(snap.x, cx); assert.equal(snap.z, cz);
+  assert.equal(snap.stalker.hunting, false);
+});
+
+test('coming back from being caught, nothing it knew about your breath carries over', () => {
+  const {st} = make(level('cistern'));
+  st.exposed = true; st.lingerKnown = true; st.clue = 'breath'; st.guessing = true;
+  st.wake();
+  assert.ok(!st.exposed && !st.lingerKnown && !st.guessing);
+  assert.equal(st.clue, null);
+});
+
+test('a hiding place is only noted when it has reason to know: not at range because it hunted you once', () => {
+  const def = level('cistern'), memory = new Memory(), {s, st, p} = make(def, 'normal', 3, memory);
+  const h = s.L.hides[0];
+  p.x = h.x; p.z = h.z; p.crouched = true; p.crouchT = 1;
+  const far = st.planner.spots.reduce((a, q) => (Math.hypot(q.x - h.x, q.z - h.z) > Math.hypot(a.x - h.x, a.z - h.z) ? q : a));
+  st.x = far.x; st.z = far.z; st.nav.field(st.x, st.z, st.field);
+  st.enter('patrol', 0); st.sinceFix = 2; // a long-past hunt leaves this frozen low: it must not count
+  run(s, 0, 2);
+  assert.equal(memory.hideCount(0), 0);
+});
+
+test('heard the scanner while stalking: it comes for where it heard you, not where you have got to', () => {
+  const {s, st, p} = make(level('cistern'));
+  st.enter('stalk', 0); st.sinceFix = 0;
+  st.lastKnown.x = 21; st.lastKnown.z = 5; st.tense = 0.05;
+  p.x = 8; p.z = 30; p.still = 9;
+  run(s, 0, 0.2);
+  assert.equal(st.lastKnown.x, 21); assert.equal(st.lastKnown.z, 5);
+  assert.notEqual(st.state, 'stalk');
+});
+
 test('every patrol point and spawn is somewhere it can stand', () => {
   for (const def of LEVELS) {
     if (!def.stalker) continue;
@@ -521,6 +631,18 @@ test('a door slammed on it leaves it beside the door, not inside it', () => {
   assert.ok(s.setDoor('gallery-west', false, false), 'the door shut');
   assert.ok(s.nav.walkableAt(st.x, st.z), `it stands at ${st.x},${st.z}`);
   assert.ok(Math.hypot(st.x - 13, st.z - 5) < 2.5, 'beside it');
+});
+
+test('and it ends up on the far side of that door from you', () => {
+  const def = LEVELS.find(l => l.id === 'shaft');
+  for (const [px, west] of [[16, true], [10, false]]) {
+    const {s, st, p} = make(def, 'normal', 3);
+    p.x = px; p.z = 5;
+    run(s, 0, 0.05);
+    st.x = 13; st.z = 5;
+    assert.ok(s.setDoor('gallery-west', false, false));
+    assert.equal(st.x < 13, west, `you at x ${px}, it at x ${st.x}`);
+  }
 });
 
 test('coming back, you do not find it standing in the room you are heading for', () => {

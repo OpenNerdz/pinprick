@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {gradeRun, parFor, debriefRows, learnedLines} from '../src/ui/debrief.js';
 import {sanitize, DEFAULTS} from '../src/ui/settings.js';
-import {keyboardRows, dragRows, touchRows, padRows, rowsHtml} from '../src/ui/controls.js';
+import {controlSets, panelsHtml, shortHtml, bindHtml, ACTIONS, bars} from '../src/ui/controls.js';
 import {brainText, brainValue, heatPixel} from '../src/ui/debugview.js';
 import {LEVELS} from '../src/levels/index.js';
 
@@ -48,15 +48,42 @@ test('stored settings cannot break the game', () => {
   assert.equal(sanitize({...DEFAULTS, volume: null}).volume, DEFAULTS.volume);
 });
 
-test('every way of playing documents every action', () => {
-  for (const [name, rows] of [['keys', keyboardRows()], ['drag', dragRows()], ['touch', touchRows(false)], ['touch left', touchRows(true)], ['pad', padRows()]]) {
-    const text = JSON.stringify(rows).toLowerCase();
-    for (const word of ['walk', 'look around', 'paint the dark', 'one full picture', 'hides you', 'motion tracker', 'stone', 'breath', 'pause']) {
-      assert.ok(text.includes(word), `${name} lacks ${word}`);
+test('every way of playing documents every action, and says what it does', () => {
+  const need = ['walk', 'sprint', 'crouch', 'look', 'scan', 'sweep', 'track', 'throw', 'breath', 'pause'];
+  for (const opts of [{}, {noLock: true}, {lefty: true}]) for (const set of controlSets(opts)) {
+    for (const act of need) {
+      assert.ok(set.binds[act], `${set.id} lacks ${act}`);
+      assert.ok(ACTIONS[act].name, act);
     }
-    assert.ok(rowsHtml(rows).includes('<b>'));
+    const panel = panelsHtml([set], set.id, opts);
+    for (const act of need) assert.ok(panel.includes(`data-act="${act}"`), `${set.id} never shows ${act}`);
+    assert.ok(!panel.includes('undefined'), `${set.id}: an empty field in the panel`);
+    assert.ok(shortHtml(set).includes('<kbd'), set.id);
   }
-  assert.ok(JSON.stringify(keyboardRows()).includes('F, E or right click'));
+});
+
+test('the controls sheet tells the truth about the keys', () => {
+  const [keys, pad] = controlSets();
+  const caps = bind => [...bindHtml(bind, 'keys').matchAll(/<kbd[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/kbd>/g)].map(m => m[1]);
+  assert.deepEqual(caps(keys.binds.sweep), ['F', 'E', 'Right click']);
+  assert.deepEqual(caps(keys.binds.track), ['Q', 'Middle click']);
+  assert.deepEqual(caps(keys.binds.scan), ['Left click', 'Space']);
+  assert.ok(bindHtml(keys.binds.breath, 'keys').includes('hold'));
+  assert.deepEqual(caps(pad.binds.scan), ['RT']);
+  assert.deepEqual(caps(pad.binds.throw), ['RB']);
+  assert.deepEqual(caps(pad.binds.breath), ['LB']);
+});
+
+test('how loud each action looks comes from the real noise ranges, loudest last', () => {
+  assert.equal(ACTIONS.breath.hears, 0);
+  assert.ok(ACTIONS.crouch.hears < ACTIONS.walk.hears && ACTIONS.walk.hears < ACTIONS.sprint.hears && ACTIONS.sprint.hears < ACTIONS.sweep.hears);
+  assert.equal(bars(0), 0);
+  assert.equal(bars(32), 4);
+});
+
+test('the touch map mirrors for left-handers', () => {
+  const x = lefty => +panelsHtml(controlSets({lefty}).filter(q => q.id === 'touch'), 'touch', {lefty}).match(/data-act="scan"[^>]*><circle class="btn" cx="([\d.]+)"/)[1];
+  assert.ok(x(false) > 400 && x(true) < 200, `${x(false)} and ${x(true)}`);
 });
 
 test('the brain overlay formats anything, and its heat map brightens with belief', () => {

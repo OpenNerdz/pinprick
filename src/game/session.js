@@ -75,7 +75,7 @@ export class Session {
     }
     // what the creature has learned about you, kept between runs (in the browser)
     this.memory = opts.memory || (this.demo ? new Memory() : Memory.saved());
-    this.memory.enter(def.id, Math.ceil(this.world.w * CELL / 4), Math.ceil(this.world.h * CELL / 4));
+    this.memory.enter(def.id, Math.ceil(this.world.w * CELL / 4), Math.ceil(this.world.h * CELL / 4), !opts.resume);
     this.stalker = this.L.stalker && !this.demo
       ? new Stalker(this.L.stalker, this.world, this.nav, this.diff, this.rand, this.sounds, this.playerNav,
         {memory: this.memory, rand: rng((this.seed ^ 0x9e3779b9) >>> 0), hides: this.L.hides, exit: this.exit}) : null;
@@ -142,11 +142,11 @@ export class Session {
   }
 
   /** Open or close a door by id. Slams are loud. Returns true if the door moved. */
-  setDoor(id, open, loud) {
+  setDoor(id, open, loud, force = false) {
     const d = id === 'exit' ? {prop: this.L.exitDoor, open: !this.L.exitDoor?.on} : this.L.doors.get(id);
     if (!d || !d.prop || d.open === open) return false;
     const p = d.prop, cx = (p.x0 + p.x1) / 2, cz = (p.z0 + p.z1) / 2;
-    if (!open && Math.hypot(this.player.x - cx, this.player.z - cz) < 1.4) return false; // never shut on the player
+    if (!open && !force && Math.hypot(this.player.x - cx, this.player.z - cz) < 1.4) return false; // never shut on the player
     d.open = open; p.on = !open;
     this.world.touch();
     this.nav.build(); this.playerNav.build();
@@ -457,7 +457,7 @@ export class Session {
     this.lungs = 1; this.holdingBreath = false; p.holdingBreath = false; this.breathLock = 0;
     this.stones = c.stones ?? this.diff.stones; this.thrown.flying.length = 0;
     this.scanner.heat = 0; this.scanner.overheated = false; this.scanner.charge = 0; this.scanner.sweepP = -1;
-    this.scares.pending.length = 0;
+    this.scares.dropPending();
     this.noises.length = 0;
     this.hands.reset(); this.restoreTracker(c);
     this.fx.black = 0; this.fearBoost = 0; this.sounds.setDread(0);
@@ -488,11 +488,14 @@ export class Session {
   }
 
   snapshot() {
-    const p = this.player, tr = this.tracker;
+    const p = this.player, tr = this.tracker, st = this.stalker;
     this.memory.save();
-    return {x: p.x, z: p.z, yaw: p.yaw, pitch: p.pitch, time: this.time, deaths: this.deaths,
+    const at = this.state === 'caught' ? this.checkpoint : p; // caught: coming back means coming back from there
+    return {x: at.x, z: at.z, yaw: p.yaw, pitch: p.pitch, time: this.time, deaths: this.deaths,
       got: this.cores.map(c => c.got), seed: this.seed, checkpoint: this.checkpoint, stones: this.stones, stats: this.stats,
-      crouched: p.crouched, read: this.notes.map(n => n.read), fired: this.L.triggers.map(t => t.fired),
+      crouched: p.crouched, read: this.notes.map(n => n.read), fired: this.L.triggers.map(t => t.fired && !this.scares.waiting(t)),
+      stalker: st ? {active: st.active, hunting: this.state !== 'caught' && (st.hunting || st.state === 'alert')} : null,
+      statue: this.statue ? {x: this.statue.x, z: this.statue.z, face: this.statue.face, lift: this.statue.lift, next: this.scares.statueMove} : null,
       doors: [...this.L.doors.values()].map(q => [q.id, q.open]), sweepCooldown: this.scanner.cooldown,
       tracker: tr ? {battery: tr.battery, owned: tr.owned, taken: this.batteries.map(b => b.taken), trackerTaken: !!this.L.tracker?.taken} : null};
   }
@@ -507,8 +510,9 @@ export class Session {
     if (d.crouched) { p.crouched = true; p.crouchT = 1; }
     (d.read || []).forEach((r, i) => { if (this.notes[i]) this.notes[i].read = !!r; });
     (d.fired || []).forEach((f, i) => { if (this.L.triggers[i]) this.L.triggers[i].fired = !!f; });
-    for (const [id, open] of d.doors || []) this.setDoor(id, open, false);
+    for (const [id, open] of d.doors || []) this.setDoor(id, open, false, true); // as you left it, wherever you stand
     if (d.sweepCooldown) this.scanner.cooldown = d.sweepCooldown;
+    if (d.statue && this.statue) { this.statue.place(d.statue.x, d.statue.z, d.statue.face, d.statue.lift ?? 0); this.scares.statueMove = d.statue.next || null; }
     if (d.checkpoint) this.checkpoint = d.checkpoint;
     (d.got || []).forEach((g, i) => {
       const c = this.cores[i];
@@ -517,5 +521,21 @@ export class Session {
     if (d.tracker) this.restoreTracker(d.tracker);
     this.world.touch();
     if (this.coresLeft === 0 && this.cores.length) this.allCores();
+    this.restoreStalker(d.stalker);
+  }
+
+  /**
+   * Picking a run back up, the creature is wherever it has got to: somewhere that is a long walk from you and
+   * from what you still need, not on top of you. If it was after you when you left, it still is.
+   */
+  restoreStalker(was) {
+    const st = this.stalker, p = this.player;
+    if (!st || st.state === 'finale') return;
+    const w = this.L.stalker.wake;
+    const awake = was ? was.active : st.active || (typeof w === 'string' && w.startsWith('core:') && this.coresGot >= +w.slice(5));
+    if (!awake) return;
+    st.wake(p, 'patrol', null, this.goalsLeft());
+    if (was?.hunting) st.notice(p.x, p.z, st.now);
+    else { st.graceFor = STALKER.respawnGrace; st.avoid = {x: p.x, z: p.z}; st.director.rest(STALKER.respawnGrace); }
   }
 }

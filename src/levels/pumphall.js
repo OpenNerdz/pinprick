@@ -7,6 +7,7 @@
 // One map cell is 2 m: cell (cx, cz) covers x 2cx..2cx+2, z 2cz..2cz+2.
 
 import {box, cyl, sph} from '../world/shapes.js';
+import {deco, every, frameX, frameZ, ladder, rod} from './kit.js';
 
 const circle = (n, f) => { const out = []; for (let i = 0; i < n; i++) out.push(f(i / n * Math.PI * 2, i)); return out; };
 
@@ -30,6 +31,7 @@ const pump = [
     return box(37.1, z - 0.36, 37.6, z + 0.36, y - 0.36, y + 0.36);
   }),
   box(37.2, PZ - 2.5, 37.5, PZ + 2.5, 2.88, 3.12), box(37.2, PZ - 0.12, 37.5, PZ + 0.12, 0.5, 5.5),
+  box(35.9, PZ - 2.6, 38.2, PZ + 2.6, 0, 0.3), // its bed, joining plinth to motor: the slots either side of the wheel were just wide enough to get wedged in
   box(35.6, PZ - 0.2, 38.2, PZ + 0.2, 2.8, 3.2), box(38.2, PZ - 1.9, 40.4, PZ + 1.9, 0, 2.3), box(38.6, PZ - 1.4, 40, PZ + 1.4, 2.3, 3.1),
   // discharge pipes, overhead
   box(31, 14, 33, 21.6, 4.4, 5.2), box(31, 28.4, 33, 36, 4.4, 5.2), box(20, 24.2, 28.4, 25.8, 4.2, 5),
@@ -92,6 +94,7 @@ export default {
     // the landing: the cage you came down in, its cable, what fell with it
     ...bars, box(4, 40, 8, 44, 2.55, 2.62), box(4, 39.97, 8, 40.03, 0, 0.22), box(4, 43.97, 8, 44.03, 0, 0.22), box(3.97, 40, 4.03, 44, 0, 0.22), cyl(6.2, 41.4, 0.06, 2.62, 3), cyl(4.6, 38.25, 0.07, 0, 3),
     box(9.6, 38.4, 11.6, 40, 0, 1.3), box(10, 38.7, 11.2, 39.7, 1.3, 1.9), box(10, 44.6, 11.6, 45.7, 0, 1), cyl(9.3, 45.4, 0.3, 0, 0.9),
+    ...ladder(7.4, 38.1, 'x', 0, 3), // the operator's way down
 
     // settling gallery: low pipe along the south wall, sluice frames between the tanks, a crate and some buckets
     box(16, 45.6, 42, 46, 0, 0.5), box(24, 41.9, 28, 42.1, 2.3, 2.5), box(32, 41.9, 36, 42.1, 2.3, 2.5),
@@ -132,9 +135,12 @@ export default {
     box(33.2, 9.4, 33.8, 10, 0, 0.48), box(33.2, 9.4, 33.8, 9.46, 0.48, 1),
     box(35, 10.2, 36.6, 11.6, 0, 0.04, {solid: false}), box(35.7, 10.1, 35.9, 10.2, 0.02, 0.14, {solid: false}),
 
-    // control room: consoles, a desk, racks, and the stair behind the door
+    // control room: consoles, a desk and its chair, racks, the plant diagram on the wall, cable tray to the door, and the stair behind it
     box(46.4, 2.3, 52.6, 3, 0, 1.1), box(46.6, 2.35, 52.4, 2.55, 1.1, 1.7), box(48.5, 6.5, 51, 7.5, 0, 0.85),
     box(46.4, 10.6, 50.6, 11.6, 0, 2.4), box(54.4, 2.3, 55.6, 3.1, 0, 1.8),
+    box(49.5, 5.6, 50, 6.1, 0, 0.48), box(49.5, 5.54, 50, 5.6, 0.48, 1),
+    deco(46.8, 2, 52.2, 2.1, 1.8, 2.7), ...every(47.3, 51.7, 1.1, x => deco(x, 2.1, x + 0.5, 2.26, 2, 2.5)),
+    deco(46, 11.7, 56, 12, 2.5, 2.6), deco(55.7, 4, 56, 12, 2.5, 2.6), ...every(47.5, 54.5, 3.5, x => deco(x - 0.6, 6.9, x + 0.6, 7.1, 2.82, 3)),
     box(57.65, 4.1, 58, 5.9, 0, 0.3, {solid: false}), box(57.8, 4.1, 58, 5.9, 0.3, 0.6, {solid: false}),
 
     // motor hall: three motors down the east side, transformers with their fins, cable trays
@@ -142,6 +148,12 @@ export default {
     box(48.4, 15.6, 50.6, 19, 0, 2.6), box(48.4, 29, 50.4, 32.4, 0, 2),
     ...circle(5, (a, i) => box(50.6, 16 + i * 0.6, 50.8, 16.2 + i * 0.6, 0.2, 2.4)),
     box(48, 20.9, 54, 21.2, 4, 4.1), box(48, 27, 54, 27.3, 4, 4.1), box(48, 33.6, 58, 33.9, 3.2, 3.4),
+
+    // the corridors and crawls: a frame now and then, low in a crawl, so a run of them tells you what you are in
+    ...frameZ(34.6, 6, 8, 3), ...frameZ(36.8, 6, 8, 3), ...frameX(44.6, 4, 6, 2.2),
+    ...frameZ(10, 8, 10, 3), ...frameX(12.6, 40, 42, 2.2), ...frameX(14.6, 40, 42, 2.2),
+    ...frameX(16, 28, 30, 1.6), ...frameX(18, 28, 30, 1.6), ...frameZ(37, 38, 40, 1.6), ...frameZ(13, 34, 36, 1.6), ...frameX(43.6, 8, 10, 1.6),
+    ...frameX(46.8, 24, 26, 2.2), ...frameZ(12.8, 52, 54, 3), ...frameZ(35, 52, 54, 2.2), rod(53.86, 13.4, 0.05, 0, 3),
 
     // the south-east room past the ducts: drums and a crate; baffle plates in the ducts
     box(55.2, 40.2, 56.6, 41.6, 0, 1.3), box(55.5, 40.5, 56.3, 41.3, 1.3, 1.9), cyl(55, 45.2, 0.35, 0, 1), cyl(55.8, 45.4, 0.35, 0, 1),
@@ -192,7 +204,7 @@ export default {
     {x: 44.8, z: 41, r: 1.2, actions: [['whisper', 56, 40]]},
     // the safest room in the level, and it is quiet, and it stays quiet, and then it breathes on you
     {x: 34, z: 10.2, r: 2.4, delay: 1.5, actions: [['hush', 9]]},
-    {x: 38, z: 4.2, r: 3, cores: 3, delay: 0.4, actions: [['slam', 'manifold-east', 'Ahead of you a door slams. There is a crawl, or the long way round by the motors.', 5000]]},
+    {x: 38, z: 4.2, r: 3, cores: 3, delay: 0.4, actions: [['slam', 'manifold-east', 'At the end of the gallery a door slams. There is a crawl, or the long way round by the motors.', 5000]]},
     {x: 34.5, z: 39, r: 2.6, cores: 4, delay: 0.4, actions: [['slam', 'hall-south', 'The door up into the hall slams. Round through the ducts, or the crawl.', 5000]]},
     // the last run: the short way shuts wherever you are, which leaves a slow crawl it will go round to meet,
     // or the long way by the motors. The statue has got to the room with the door before you...

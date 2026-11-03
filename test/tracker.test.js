@@ -238,3 +238,80 @@ test('the title-screen demo has no tracker', () => {
   assert.equal(s.tracker, null);
   assert.equal(s.trackerState(0), null);
 });
+
+test('when the cell gives out the tube dies in your hand, and only then does it go down', () => {
+  const {s} = make(LEVELS[1]), h = s.hands, tr = s.tracker;
+  let t = raise(s, 0);
+  tr.battery = 0.001;
+  t = run(s, t, 0.5);
+  assert.equal(tr.battery, 0); assert.equal(tr.on, false);
+  assert.equal(h.want, 'gun', 'it has stopped being up, for every rule that asks');
+  assert.equal(h.trackerUp, false);
+  assert.ok(h.trk > 0.9 && h.dying > 0, 'but it is still in your hand');
+  assert.ok(s.trackerState(t), 'and you can see it');
+  t = run(s, t, 1.2);
+  assert.ok(h.trk < 0.01, 'then it drops');
+});
+
+test('sprinting does not wait for a tube to die', () => {
+  const {s} = make(LEVELS[1]), h = s.hands, tr = s.tracker;
+  let t = raise(s, 0);
+  tr.battery = 0.001;
+  t = run(s, t, 0.3, () => ({...intent(), moveY: 1, sprint: true}));
+  assert.equal(h.dying, 0);
+});
+
+test('the tube follows the switch: blooming up, full, and collapsing when it goes off', () => {
+  const {s} = make(LEVELS[1]), h = s.hands, tr = s.tracker, vm = s.viewmodel;
+  let t = run(s, 0, dt, press('track'));
+  while (!tr.on) t = run(s, t, dt);
+  t = run(s, t, dt);
+  assert.ok(vm.crtH < 0.1, `a line at first (${vm.crtH})`);
+  t = run(s, t, TRACKER.boot + 0.5);
+  assert.equal(vm.crtH, 1); assert.equal(vm.crtW, 1);
+  assert.ok(vm.crtPower > 0.99, 'and settled');
+  t = run(s, t, dt, press('track')); t = run(s, t, dt);
+  assert.ok(vm.crtH < 1 && vm.crtPower > 0, 'squeezing down');
+  t = run(s, t, 0.5);
+  assert.equal(vm.crtPower, 0, 'dark');
+  assert.ok(h.trk < 0.5);
+});
+
+test('its hands shake harder as what it found gets closer', () => {
+  const {s} = make(LEVELS[1]), tr = s.tracker, vm = s.viewmodel;
+  const settle = gap => {
+    let t = raise(s, 0);
+    tr.blips.length = 0;
+    const p = s.player, R = tr.diff.trkRange;
+    for (let i = 0; i < 40; i++) { tr.blips[0] = {x: p.x + Math.sin(p.yaw) * gap * R, z: p.z - Math.cos(p.yaw) * gap * R, t}; t = run(s, t, dt); }
+    return vm.tremble;
+  };
+  const far = settle(0.9), near = settle(0.2);
+  assert.ok(near > far * 3, `${far} far, ${near} near`);
+});
+
+test('the range window reads the nearest blip still glowing, and dashes with none', () => {
+  const {s} = make(LEVELS[1]), tr = s.tracker;
+  let t = raise(s, 0); t = run(s, t, 0.6);
+  const window = () => [...s.trackerState(t).e].slice(0, 3);
+  assert.deepEqual(window(), [0x40, 0x40, 0x40], 'dashes');
+  const p = s.player;
+  tr.flood = 0;
+  tr.blips.push({x: p.x + Math.sin(p.yaw) * 12.3, z: p.z - Math.cos(p.yaw) * 12.3, t}, {x: p.x + Math.sin(p.yaw) * 19, z: p.z - Math.cos(p.yaw) * 19, t});
+  assert.deepEqual(window(), [0x06, 0x5b, 0x4f], '12.3 m');
+});
+
+test('with an empty battery, trying it flips the switch and it lifts into view', () => {
+  const {s, calls} = make(LEVELS[1]), h = s.hands, tr = s.tracker;
+  tr.battery = 0;
+  let t = run(s, 0, dt, press('track'));
+  assert.equal(count(calls, 'trackerClick'), 1);
+  assert.ok(h.peek > 0.9 && s.trackerState(t), 'it is drawn');
+  t = run(s, t, 0.25);
+  assert.ok(s.viewmodel.tUp.x > 0.3, `lifted ${s.viewmodel.tUp.x}`);
+  assert.ok(s.viewmodel.tToggle.x < 0, 'switch up');
+  t = run(s, t, 1.2);
+  assert.ok(s.viewmodel.tToggle.x > 0, 'and fallen back');
+  assert.equal(s.trackerState(t), null);
+});
+

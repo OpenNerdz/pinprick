@@ -5,6 +5,7 @@
 // heart and the dread play inside your head.
 
 import {clamp} from '../util/math.js';
+import {TRACKER} from '../config.js';
 import {Bank} from './bank.js';
 import {RECIPES} from './recipes.js';
 
@@ -320,36 +321,32 @@ export class Sounds {
   crackle() { this.play('crackle', {gain: 0.035, bus: this.e.dev}); }
 
   // ---------------------------------------------------------------- the motion tracker (in your hand)
-  /** The pulse, once a second: a dry tick and a short falling tone, quiet, so the room stays quiet. */
-  trackerPulse() {
-    const e = this.e, dev = e.dev;
-    e.noise(0.012, 0.01, {filter: 'highpass', freq: 4000, echo: false, bus: dev});
-    e.tone(1150, 0.011, 0.12, {to: 980, bus: dev, echo: false});
-  }
-  /** Something moved: the nearer (0 far .. 1 on you), the higher and louder; very near, a double beep. */
+  /** The pulse, once a second: one dry electronic tick, quiet, so the room stays quiet. */
+  trackerPulse() { this.play('trkTick', {gain: 0.04, bus: this.e.dev, echo: false, rate: 0.97 + Math.random() * 0.06}); }
+  /**
+   * Something moved. A hollow ping through the small speaker: the nearer (0 far .. 1 on you) the higher
+   * it sits, and the more of them there are before the next pulse, so the rhythm quickens as it closes.
+   */
   trackerReturn(close, pan = 0) {
-    const e = this.e, f = 600 * Math.pow(2, 1.2 * clamp(close, 0, 1)), g = 0.02 + 0.022 * close, o = {pan, bus: e.dev, echo: false};
-    e.tone(f, g, 0.09, {...o, type: 'triangle'});
-    e.tone(f * 2, g * 0.35, 0.07, o);
-    if (close > 0.8) e.tone(f * 1.06, g, 0.08, {...o, type: 'triangle', at: 0.12});
+    const c = clamp(close, 0, 1), n = c < 0.28 ? 1 : c < 0.58 ? 2 : c < 0.82 ? 3 : 4;
+    const rate = 0.72 * Math.pow(2, 1.3 * c), g = 0.0115 + 0.0155 * c, gap = TRACKER.pulseEvery / n;
+    for (let i = 0; i < n; i++) this.play('trkPing', {gain: g * (1 - 0.14 * i), rate: rate * (1 + 0.012 * i), pan, at: i * gap, bus: this.e.dev, echo: false});
   }
-  /** Right on top of you: frantic beeps through static. */
+  /** Right on top of you: the pings pile up, high and fast, through static. */
   trackerFrantic() {
     this.tell('tracker');
-    for (let i = 0; i < 3; i++) this.e.tone(1600, 0.012, 0.045, {type: 'square', at: i * 0.07, bus: this.e.dev, echo: false});
+    for (let i = 0; i < 4; i++) this.play('trkPing', {gain: 0.006, rate: 2.05 + 0.05 * i, at: i * 0.075, bus: this.e.dev, echo: false});
     this.crackle();
   }
-  trackerBoot() { const dev = this.e.dev; this.e.tone(660, 0.01, 0.06, {bus: dev, echo: false}); this.e.tone(1320, 0.008, 0.06, {at: 0.07, bus: dev, echo: false}); }
+  /** Coming up: a faint chirp as the supply comes in. */
+  trackerBoot() { this.play('trkChirp', {gain: 0.0032, bus: this.e.dev, echo: false}); }
   trackerOff() { this.e.tone(700, 0.007, 0.1, {to: 300, bus: this.e.dev, echo: false}); }
   trackerLow() {
     this.e.tone(1200, 0.015, 0.06, {type: 'square', bus: this.e.dev, echo: false});
     this.e.tone(900, 0.015, 0.06, {type: 'square', at: 0.12, bus: this.e.dev, echo: false});
   }
-  /** Running flat: the screen dies with a falling whine. */
-  trackerDead() {
-    this.e.tone(400, 0.02, 0.35, {type: 'sawtooth', to: 60, bus: this.e.dev, echo: false});
-    this.e.noise(0.03, 0.02, {freq: 1200, at: 0.3, bus: this.e.dev, echo: false});
-  }
+  /** Running flat: the whine sags and the tube's last charge snaps. */
+  trackerDead() { this.play('trkDie', {gain: 0.0065, bus: this.e.dev, echo: false}); }
   /** Raising a dead one: just the switch. */
   trackerClick() { this.play('switch', {gain: 0.04, rate: 0.7}); }
   /** A battery snapped in: two clacks and the charge whining up. */

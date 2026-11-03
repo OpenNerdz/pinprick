@@ -285,6 +285,74 @@ function mimic(kind) {
   };
 }
 
+// ---------------------------------------------------------------- the motion tracker
+
+/**
+ * A pulse going out: a very short, very dry transistor click with a little tone in it, like a relay in a
+ * sealed metal case. Almost nothing after the first few milliseconds, so it never smears the room.
+ */
+function trkTick(sr, r) {
+  const a = buf(sr, 0.05), f = r.range(1090, 1140);
+  // the switching edge: one sharp step through a small resonant can
+  strike(a, sr, r, new Body(sr, [[r.range(3100, 3400), 0.012, 1], [f, 0.028, 0.75], [r.range(6200, 6900), 0.006, 0.45]]), 0, 1, 0.4, 0.12);
+  // and the same again, far softer, as the driver lets go
+  strike(a, sr, r, new Body(sr, [[r.range(2400, 2600), 0.01, 1], [f * 0.93, 0.02, 0.5]]), Math.floor(0.0065 * sr), 0.28, 0.3, 0.05);
+  return done(a, sr, 6);
+}
+
+/**
+ * Something answered. A clean sine with a soft odd harmonic, sharp for an instant and then settling, in
+ * a short tube of air: that comb is what makes it hollow, and the tube ringing on is the short tail.
+ * Rendered at one pitch; the game plays it faster the closer the contact is.
+ */
+function trkPing(sr, r) {
+  const a = buf(sr, 0.34), f0 = 880, n = a.length;
+  const dly = new Float32Array(Math.round(sr / (2 * f0 * 1.008))); // half a period: a stopped tube, which only rings on odd harmonics
+  let ph = 0, w = 0;
+  const tail = new Mode(sr, f0 * 1.003, 0.3, 1), tail3 = new Mode(sr, f0 * 3.01, 0.14, 1.2);
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    ph += TAU * f0 * (1 + 0.022 * Math.exp(-t / 0.012)) / sr;
+    const env = Math.min(1, t / 0.0022) * (t < 0.03 ? 1 : Math.exp(-(t - 0.03) / 0.028));
+    const tone = (Math.sin(ph) + 0.28 * Math.sin(3 * ph) + 0.05 * Math.sin(5 * ph)) * env;
+    const y = tone - dly[w] * 0.5;
+    dly[w] = y; w = (w + 1) % dly.length;
+    a[i] = y + (tail.run(tone) + tail3.run(tone)) * 0.006;
+  }
+  return done(a, sr, 30);
+}
+
+/** Switching on: a chirp up as the supply comes in, with a thin whine that settles and is gone. */
+function trkChirp(sr, r) {
+  const a = buf(sr, 0.26), n = a.length;
+  let ph = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr, up = Math.min(1, t / 0.075);
+    const f = 620 * Math.pow(4.4, up * up * (3 - 2 * up)) * (1 + 0.012 * Math.sin(TAU * 62 * t));
+    ph += TAU * f / sr;
+    const env = Math.min(1, t / 0.004) * (t < 0.075 ? 0.75 + 0.25 * up : Math.exp(-(t - 0.075) / 0.05));
+    a[i] = (Math.sin(ph) + 0.16 * Math.sin(3 * ph)) * env;
+  }
+  strike(a, sr, r, new Body(sr, [[r.range(2900, 3300), 0.01, 1], [r.range(5200, 5800), 0.006, 0.5]]), 0, 0.5, 0.4, 0.1);
+  return done(a, sr, 15);
+}
+
+/** The cell giving out: the whine sags as the rail collapses, stumbles, and the tube's last charge snaps. */
+function trkDie(sr, r) {
+  const a = buf(sr, 0.95), n = a.length;
+  let ph = 0, slip = 0, st = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr, p = t / 0.8;
+    if (--st <= 0) { slip = r.range(0.72, 1); st = r.range(0.018, 0.07) * sr; }
+    const f = 1050 * Math.pow(0.055, Math.min(1, p)) * (1 + 0.05 * Math.sin(TAU * 13 * t)) * slip;
+    ph += TAU * f / sr;
+    const env = Math.min(1, t / 0.01) * Math.pow(Math.max(0, 1 - p), 0.8);
+    a[i] = (Math.sin(ph) + 0.4 * Math.sin(2 * ph) + 0.22 * Math.sin(3 * ph)) * env * 0.8;
+  }
+  grit(a, sr, r, 0.74, 0.86, 7, 0.5, 1800);
+  return done(a, sr, 20);
+}
+
 // ---------------------------------------------------------------- scares
 
 /** A bowed sheet of metal sliding as it rings (the waterphone of a horror score), over a deep boom. */
@@ -629,6 +697,10 @@ export const RECIPES = {
   mimicPing: {n: 2, rate: 0.5, make: mimic('ping')},
   mimicChime: {rate: 0.5, make: mimic('chime')},
   mimicTracker: {make: mimic('tracker')},
+  trkTick: {n: 3, make: trkTick},
+  trkPing: {n: 2, make: trkPing},
+  trkChirp: {make: trkChirp},
+  trkDie: {make: trkDie},
   sting: {n: 2, rate: 0.5, make: sting},
   whisper: {n: 4, rate: 0.5, make: whisper},
   bed: {loop: true, rate: 0.5, make: bed},

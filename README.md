@@ -45,8 +45,10 @@ it on every level and difficulty and prints how often each gets caught; `node to
 whole levels with a cast of player bots who only know what a player could see and hear, and reports
 deaths, hunts, pacing and anything that looks like a bug in the creature.
 
-**How it thinks.** Its brain is built on the rule that it never reads your position. A test proves it:
-two silent players in different places give it an identical picture of the world.
+**How it thinks.** It has to find you: what it decides comes from what it senses, not from where you
+really are. A test checks this: two silent players in different places give it an identical picture of the
+world. The exceptions are small and deliberate. It can tell when it is right on top of you, your beam gives
+away where you are, and the director (below) uses your position only for a vague hunch or to steer it away.
 - **It keeps a map of where you might be.** A grid of odds, fed only by what it hears and by the places
   it has searched and found empty. The odds spread out over time, along paths you could really walk.
 - **It decides where to go next.** It weighs every room, chokepoint and hiding place by how long since it
@@ -76,7 +78,8 @@ Quit or reload mid-level and **Continue** puts you back at your last core. F3 in
 the creature's map of odds and what it is thinking.
 
 The scanner in your hand is a real 3D model: every dot leaves its emitter, the coils light as it
-charges, the fins glow as it heats, and the screen on its back shows charge, heat and sweep.
+charges, the vent fins open and glow as it heats, and the screen on its back shows charge, heat and
+sweep. It moves on springs, so it kicks when you throw a stone and steadies when you hold your breath.
 
 **Sound.** Everything is synthesised from physical models when the game starts, a few variants of
 each, so nothing repeats exactly:
@@ -90,8 +93,9 @@ each, so nothing repeats exactly:
   creaking in the shaft.
 - **3D:** the creature and the tunnels are placed around your head (best with headphones), so a sound
   behind you is behind you.
-- **Inside your head:** your devices beep through their own tinny speaker; your heart and, when it is
-  close, your own shaking breath are there too.
+- **Inside your head:** your devices sound through their own small speakers: the tracker gives a dry
+  tick, then a hollow ping for each contact. Your heart and, when it is close, your own shaking breath
+  are there too.
 
 `node tools/audition.mjs` renders scenes through the real sound code to `.tmp/audio`, as WAV and MP3,
 with their loudness; `node tools/audition.mjs dry` renders every sound on its own.
@@ -99,12 +103,15 @@ with their loudness; `node tools/audition.mjs dry` renders every sound on its ow
 **The motion tracker** (Q or middle click; TRACK on touch) is held in your other hand, on the left
 (the right when left-handed; on touch screens it sits higher, clear of the thumbstick). You find it in
 Intake, and you can scan and sweep while it is up. Once a second it ticks and a wave sweeps across its screen. Anything that moved within reach
-lights up as a blip, ahead of you and straight through rock. A return beep rises in pitch as the blip
-gets closer. Its limits are what make it worth reading carefully:
+lights up as a blip, ahead of you and straight through rock. A return ping rises in pitch and comes
+faster as the blip gets closer. It is a heavy old survey unit of its own design: a cast casing, a ribbed
+drum that ratchets round with each pulse, a green tube that flickers on, keeps a burnt-in ghost and
+collapses to a line when the battery dies, and a three-digit range window. Its limits are what make it
+worth reading carefully:
 - **Only motion.** A creature that listens, waits, lingers or is pinned in your beam is invisible to it.
   Each blip is where something was when the wave passed.
 - **Behind you.** It only lights the edge of the screen, and on Hard it shows nothing at all.
-- **Close range.** Inside 4 m the screen floods with static.
+- **Close range.** Inside 4 m the picture tears up and floods with static.
 - **False contacts.** The scripted scares show up too: the footsteps, the figure, the statue.
 
 Using it costs you, too:
@@ -160,7 +167,7 @@ src/
     session.js     one play of one level: ties everything together, checkpoints, win/death
     player.js      walk, sprint on stamina, crouch, footsteps and their noise
     scanner.js     trigger, heat and overheat, sweep, dot colours; rays leave the gun's emitter
-    viewmodel.js   how the gun sits in your hands: sway, lag, recoil, sprint, wall pull-back
+    viewmodel.js   how the devices sit in your hands: springs for sway, lag, recoil, sprint, wall pull-back
     stalker.js     the creature's body and senses: hearing by path distance, its states and tricks
     belief.js      its grid of odds for where you are, fed only by what it senses
     planner.js     where it goes next when nothing is calling it
@@ -175,9 +182,9 @@ src/
     ghosts.js      the previous operator's rust-coloured dots
   render/          WebGL: depth-only level mesh, live-range dot ring buffer, beams, the gun
     gunmesh.js     the scanner's geometry, built in code
-    gun.js         its shader: key and rim light, emitter glow, glowing coils, fins and screen
-    trackermesh.js, tracker.js   the motion tracker's geometry, and its screen drawn in the shader
-    meshkit.js     box / cylinder / extrusion helpers both devices are built from
+    gun.js         its shader: key and rim light, emitter glow, coils, fins and screen; moving parts in the vertex shader
+    trackermesh.js, tracker.js   the motion tracker's geometry, and its old tube and range window drawn in the shader
+    meshkit.js     chamfered box / lathe / loft / stencil helpers both devices are built from
     post.js        bloom, grain and fear effects, stepping down by itself on slow GPUs
   audio/           every sound is synthesised; there are no audio files
     dsp.js         sample-level models: filters, ringing modes, grit, friction, a throat
@@ -188,7 +195,7 @@ src/
     worker.js      renders the sound bank off the main thread, so starting up does not stall
   ui/              input (touch/mouse/keys/gamepad -> intent), HUD, settings, haptics, menus,
                    captions, the end-of-level debrief, the F3 brain view
-  levels/          one file per level + index.js for the order
+  levels/          one file per level, kit.js (the parts they are dressed with), index.js for the order
 test/              node:test suites (no browser needed)
 tools/             build.mjs, smoke.mjs, balance.mjs, playtest.mjs (player bots, see above), audition*.mjs
 android/           WebView wrapper for the APK
@@ -204,6 +211,12 @@ reached on foot (also with every slammable door shut), that the exit pad can act
 that wall writing sits on a real wall, and that the creature can walk its whole patrol route. A bot
 then plays the level through the real game code, and `test/stalker.test.js` checks the creature stays
 fair there (never walks into a still player, never camps a crawl, gives a careful finale run a chance).
+
+A level is only ever seen as dots, so detail means shape. `src/levels/kit.js` has the parts levels are
+dressed with: pipes, frames, shelving and so on. What is overhead or hard against a wall is not solid, so it
+changes nothing about where anything walks or how sound travels; `test/content.test.js` checks that anything
+in the open at body height is solid. A level can add its own map characters with `legend`, and scale the
+creature's senses for that level with `tune`.
 
 ## Notes
 

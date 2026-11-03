@@ -43,13 +43,14 @@ export class Memory {
   }
 
   /** Start a level: habits fade a little, and the map of where it has heard you here comes back. */
-  enter(levelId, cols, rows) {
+  /** `fade` is for a new visit: picking a saved run back up is the same visit, so nothing is forgotten. */
+  enter(levelId, cols, rows, fade = true) {
     this.level = levelId; this.cols = cols; this.rows = rows;
     const {data} = this;
-    for (const k of Object.keys(data.habits)) data.habits[k] *= FADE;
+    if (fade) for (const k of Object.keys(data.habits)) data.habits[k] *= FADE;
     const lv = this.lv = data.levels[levelId] || (data.levels[levelId] = {heat: [], hides: {}});
     if (lv.heat.length !== cols * rows) lv.heat = new Array(cols * rows).fill(0);
-    for (let i = 0; i < lv.heat.length; i++) lv.heat[i] *= HEAT_FADE;
+    if (fade) for (let i = 0; i < lv.heat.length; i++) lv.heat[i] *= HEAT_FADE;
   }
 
   /** 0 (it has never seen you do this) .. 1 (it knows this about you). */

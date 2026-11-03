@@ -314,3 +314,23 @@ test('the dread cannot be left playing when the frames stop', () => {
   assert.ok(q[0][0] > 0.2);
   assert.deepEqual([q[1][0], q[1][1] > 1], [0, true]);
 });
+
+test('the tracker: a dry tick and a short tail on its ping, and rising, quickening returns', () => {
+  const tickDur = render('trkTick')[0].length / SR, pingDur = render('trkPing')[0].length / SR;
+  assert.ok(tickDur <= 0.06, `tick ${tickDur}`); assert.ok(pingDur <= 0.36, `ping ${pingDur}`);
+  const {s, made} = filled();
+  const pings = close => { const before = made.length; s.trackerReturn(close, 0); return made.slice(before).filter(n => n.kind === 'src'); };
+  const [far, mid, near] = [pings(0), pings(0.5), pings(1)];
+  assert.ok(far.length < mid.length && mid.length < near.length, `${far.length}, ${mid.length}, ${near.length} before the next pulse`);
+  const rate = n => n[0].playbackRate.value;
+  assert.ok(rate(far) < rate(mid) && rate(mid) < rate(near), 'pitch climbs');
+});
+
+test('the tracker keeps the names and caption the game knows it by', () => {
+  const {s, started} = filled(), told = [];
+  s.onSound = k => told.push(k);
+  for (const fn of ['trackerPulse', 'trackerBoot', 'trackerDead']) { const n = started(); s[fn](); assert.equal(started(), n + 1, fn); }
+  s.trackerFrantic();
+  assert.ok(told.includes('tracker'), 'the caption still fires');
+});
+

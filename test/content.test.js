@@ -7,6 +7,8 @@ import {LEVELS} from '../src/levels/index.js';
 import {compileLevel} from '../src/world/level.js';
 import {collide} from '../src/world/collision.js';
 import {NavGrid} from '../src/world/nav.js';
+import {Topology} from '../src/world/topology.js';
+import {bounds} from '../src/world/shapes.js';
 import {Session} from '../src/game/session.js';
 import {Camera} from '../src/render/camera.js';
 import {cast, hit} from '../src/world/raycast.js';
@@ -134,6 +136,18 @@ test('a chase in the last level is never a single-route dead end, doors open or 
   }
 });
 
+test('each level has a shape of its own: rooms of different heights, and what stands in them is not one kind of thing', () => {
+  for (const def of LEVELS) {
+    const L = compileLevel(def, 1), heights = new Set(L.world.cellH.filter(h => h > 0));
+    assert.ok(heights.size >= 3, `${def.id} has ${heights.size} ceiling heights`);
+    const open = L.world.cellH.filter(h => h > 0).length * 4;
+    assert.ok(def.props.length / open > 0.15, `${def.id}: ${def.props.length} props in ${open} m2 of floor`);
+  }
+  // the shaft is an actual shaft
+  const shaft = LEVELS.find(l => l.id === 'shaft');
+  assert.ok(compileLevel(shaft, 1).world.heightAt(8, 20) > 12, 'the old shaft goes up');
+});
+
 test('the last level has crawls it cannot follow you through, and more than one way to the exit door', () => {
   const L = compileLevel(last, 1), w = L.world;
   const creature = new NavGrid(w, {radius: 0.35, minH: 2.15}), player = new NavGrid(w, {radius: PLAYER_R, minH: 1.2});
@@ -149,10 +163,10 @@ test('the last level has crawls it cannot follow you through, and more than one 
   assert.ok(new Set(last.map.join('')).has(':') && new Set(last.map.join('')).has(','), 'halls and ducts both');
 });
 
-test('the last level has no gaps the grid thinks you fit through but your body does not', () => {
+for (const def of LEVELS) test(`${def.id}: no gaps the grid thinks you fit through but your body does not`, () => {
   // a row of bars half a metre apart looks open to a half-metre grid; a bot walked into one for two minutes
-  const L = compileLevel(last, 1), w = L.world, nav = new NavGrid(w, {radius: PLAYER_R, minH: 1.2});
-  L.exitDoor.on = false;
+  const L = compileLevel(def, 1), w = L.world, nav = new NavGrid(w, {radius: PLAYER_R, minH: 1.2});
+  if (L.exitDoor) L.exitDoor.on = false;
   nav.build();
   for (let i = 0; i < nav.n; i++) {
     if (!nav.walk[i]) continue;
@@ -162,6 +176,66 @@ test('the last level has no gaps the grid thinks you fit through but your body d
       collide(w, pos, PLAYER_R, 0.95);
       assert.ok(Math.hypot(pos.x - x, pos.z - z) < 0.12, `the step through ${x},${z} is blocked`);
     }
+  }
+});
+
+for (const def of LEVELS) test(`${def.id}: every doorway on the map can really be walked through`, () => {
+  // three pipes in Sublevel's gallery door left a gap a body fits but the half-metre grid does not: you could
+  // slip through, and the creature had to go the whole way round. Each way through has to be about as short as it looks.
+  const L = compileLevel(def, 1), w = L.world;
+  if (L.exitDoor) L.exitDoor.on = false;
+  for (const d of L.doors.values()) { d.prop.on = false; d.open = true; }
+  const player = new NavGrid(w, {radius: PLAYER_R, minH: 1.2}), creature = new NavGrid(w, {radius: 0.35, minH: 2.15});
+  for (const c of new Topology(w, creature).chokes) {
+    const longest = c.cells.length * 2 * 1.4 + 8;
+    for (const [i, a] of c.mouths.entries()) for (const b of c.mouths.slice(i + 1)) {
+      const d = player.distAt(player.field(a.x, a.z), b.x, b.z, 1);
+      assert.ok(d < longest, `${def.id}: you are ${d.toFixed(0)} m from one side of the way through ${c.x},${c.z} to the other`);
+      if (c.crawl) continue;
+      const e = creature.distAt(creature.field(a.x, a.z), b.x, b.z, 1);
+      assert.ok(e < longest, `${def.id}: the creature is ${e.toFixed(0)} m from one side of the way through ${c.x},${c.z} to the other`);
+    }
+  }
+});
+
+for (const def of LEVELS) test(`${def.id}: nothing you can see at body height can be walked through`, () => {
+  const L = compileLevel(def, 1), w = L.world, nav = new NavGrid(w, {radius: PLAYER_R, minH: 1.2});
+  if (L.exitDoor) L.exitDoor.on = false;
+  nav.build();
+  for (const p of def.props) {
+    if (p.solid) continue;
+    const y0 = p.k === 2 ? p.y - p.r : p.k === 3 ? Math.min(p.ay, p.by) - p.r : p.y0, y1 = p.k === 2 ? p.y + p.r : p.k === 3 ? Math.max(p.ay, p.by) + p.r : p.y1;
+    if (y0 >= 1.7 || y1 <= 0.2) continue; // overhead, or flat on the floor
+    const [x0, z0, x1, z1] = bounds(p);
+    const a = Math.floor(x0 / nav.res), b = Math.ceil(x1 / nav.res), c = Math.floor(z0 / nav.res), d = Math.ceil(z1 / nav.res);
+    for (let iz = c; iz <= d; iz++) for (let ix = a; ix <= b; ix++) {
+      const x = (ix + 0.5) * nav.res, z = (iz + 0.5) * nav.res;
+      if (!nav.walkableAt(x, z)) continue;
+      const inside = p.k === 0 ? x > x0 && x < x1 && z > z0 && z < z1 : Math.hypot(x - p.x, z - p.z) < p.r && p.k !== 3;
+      assert.ok(!inside, `${def.id}: you can stand at ${x},${z} inside a prop at ${x0},${z0}..${x1},${z1}, y ${y0}..${y1}`);
+    }
+  }
+});
+
+for (const def of LEVELS) test(`${def.id}: no prop pokes through the roof over it, and every hiding spot can be stood in`, () => {
+  const L = compileLevel(def, 1), w = L.world, nav = new NavGrid(w, {radius: PLAYER_R, minH: 1.2});
+  const under = (x, z, y) => {
+    const h = w.heightAt(x, z);
+    if (h > 0) assert.ok(y <= h + 0.02, `${def.id}: a prop reaches ${y.toFixed(2)} m at ${x.toFixed(1)},${z.toFixed(1)} under a ${h.toFixed(1)} m roof`);
+  };
+  for (const p of def.props) {
+    if (p.k === 3) { // a pipe climbs as it goes, so check it along its length
+      for (let t = 0; t <= 1.001; t += 0.05) under(p.ax + (p.bx - p.ax) * t, p.az + (p.bz - p.az) * t, p.ay + (p.by - p.ay) * t + p.r);
+      continue;
+    }
+    const [x0, z0, x1, z1] = bounds(p), y1 = p.k === 2 ? p.y + p.r : p.y1;
+    for (let x = x0 + 0.02; x < x1; x += 0.1) for (let z = z0 + 0.02; z < z1; z += 0.1) under(x, z, y1);
+  }
+  const f = nav.field(L.start.x, L.start.z);
+  for (const h of L.hides) {
+    let inside = 0;
+    for (let i = 0; i < nav.n; i++) if (isFinite(f[i]) && Math.hypot(nav.cx(i) - h.x, nav.cz(i) - h.z) < h.r * 0.8) inside++;
+    assert.ok(inside >= 1, `${def.id}: nowhere to stand in the hiding spot at ${h.x},${h.z}`);
   }
 });
 
@@ -332,7 +406,7 @@ test('a slam waits until you are clear of the door, and only then says so', () =
   p.x = 24; p.z = 35;
   T = run(s, T, 0.5);
   assert.equal(gate.open, false, 'shut as soon as you are clear');
-  assert.deepEqual(says, ['Behind you, a gate slams shut.'], 'said once');
+  assert.deepEqual(says, ['Close by, a gate slams shut.'], 'said once');
   run(s, T, 3);
   assert.equal(says.length, 1, 'and only once');
 });

@@ -1,12 +1,12 @@
 // Moving through a sheet without a pointer, for controllers and arrow keys. A sheet reads as rows: the
-// buttons of one `.seg` or `.actions` block are a row, anything else is a row by itself. Up and down
+// buttons of one `.seg`, `.actions` or `.ctl-tabs` block are a row, anything else is a row by itself. Up and down
 // change row, left and right move along one or adjust a slider.
 
 export function menuRows(sheet) {
   const rows = [], groups = new Map();
   for (const el of sheet.querySelectorAll('button,input')) {
     if (el.disabled || el.hidden || !el.getClientRects().length) continue;
-    const group = el.closest('.seg,.actions');
+    const group = el.closest('.seg,.actions,.ctl-tabs');
     if (!group) { rows.push([el]); continue; }
     if (!groups.has(group)) { groups.set(group, []); rows.push(groups.get(group)); }
     groups.get(group).push(el);

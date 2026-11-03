@@ -76,13 +76,15 @@ export class Scares {
       if (t.shut && s.L.doors.get(t.shut)?.open !== false) continue;
       if (t.look && Math.abs(angleDiff(p.yaw, Math.atan2(t.look[0] - p.x, -(t.look[1] - p.z)))) > LOOK_WITHIN) continue;
       t.fired = true; t.firedAt = T;
-      for (const a of t.actions) this.pending.push({at: T + (t.delay ?? 0), a});
+      for (const a of t.actions) this.pending.push({at: T + (t.delay ?? 0), a, src: t});
     }
     for (let i = this.pending.length - 1; i >= 0; i--) {
       if (this.pending[i].at > T) continue;
-      const {a} = this.pending[i];
+      const {a, src} = this.pending[i];
       this.pending.splice(i, 1);
+      this.src = src;
       this.run(a, T);
+      this.src = null;
     }
 
     const f = this.figure;
@@ -173,12 +175,21 @@ export class Scares {
     }
   }
 
+  /** Has this trigger set off something that has not happened yet? */
+  waiting(t) { return this.pending.some(q => q.src === t); }
+
+  /** Forget what has not happened yet. The trigger can fire again, or a door about to slam never would. */
+  dropPending() {
+    for (const q of this.pending) if (q.src) q.src.fired = false;
+    this.pending.length = 0;
+  }
+
   /** Tries again every moment until the door has really shut; only then is anything said about it. */
   slam(a, T) {
     const s = this.s, [, id, text, ms] = a, d = s.L.doors.get(id);
     if (!d?.open) return;
     s.setDoor(id, false, true);
-    if (d.open) this.pending.push({at: T + SLAM_RETRY, a});
+    if (d.open) this.pending.push({at: T + SLAM_RETRY, a, src: this.src});
     else if (text) s.ui.say(text, ms);
   }
 
